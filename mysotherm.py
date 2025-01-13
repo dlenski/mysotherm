@@ -58,24 +58,24 @@ for did, d in devices.items():
     assert did == d.Id
     print(f'{d.Name} (model {d.Model!r}, id {d.Id!r}, firmware {firmware[did].InstalledVersion}):')
     tz = pytz.timezone(d.TimeZone)
-    if did not in states:
+    if (s := states.get(did)) is None:
         print('  No state found!')
     else:
-        s = states[did]
-        # s.Timestamp seems to be the "power-up time" of the device
-        ts = 0
+        mints, maxts = 1<<32, 0
         width = max(len(k) for k in s)
         for k, vd in sorted(s.items()):
             if not isinstance(vd, dict):
-                continue
-
-            if vd.t > 1000<<30:
-                vd.t /= 1000   # sometimes ms, sometimes seconds!? insane
-            if vd.t > ts:
-                ts = vd.t
+                vd = slurpy(v=vd, t=None)  # sometimes {"v": value, "t": timestamp}, sometimes bare value?
+            else:
+                if vd.t > 1000<<30:
+                    vd.t /= 1000   # sometimes ms, sometimes seconds!? that's insane
+                if vd.t > maxts:
+                    maxts = vd.t
+                elif vd.t < mints:
+                    mints = vd.t
 
             if vd.v == -1:
-                vd.v = None
+                vd.v = None  # missing/invalid values, I think
 
             if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink'):
                 if d.Format == 'fahrenheit':
@@ -84,10 +84,14 @@ for did, d in devices.items():
                     v = f'{vd.v}°C'
             elif k in ('Humidity', 'Brightness'):
                 v = f'{vd.v}%'
+            elif k == 'Timestamp':
+                # I'm not sure what this timestamp is, exactly
+                v = datetime.fromtimestamp(vd.v, tz=tz)
             else:
                 v = vd.v
 
             print(f'  {k+":":{width+1}} {v}')
         else:
-            ts = datetime.fromtimestamp(ts, tz=tz)
-            print(f'  Last update at {ts.isoformat()}')
+            mints = datetime.fromtimestamp(mints, tz=tz)
+            maxts = datetime.fromtimestamp(maxts, tz=tz)
+            print(f'  Last updates between {mints} - {maxts}')
