@@ -1,10 +1,11 @@
-import pycognito
-import requests
-import pytz
-from time import time
+#!/bin/env python3
+from argparse import ArgumentParser
 from datetime import datetime
 
-from argparse import ArgumentParser
+import pycognito
+import pytz
+import requests
+
 p = ArgumentParser()
 p.add_argument('-u', '--user', help='Mysa username')
 p.add_argument('-p', '--password', help='Mysa password')
@@ -20,7 +21,6 @@ class slurpy(dict):
             return self[k]
         except KeyError as e:
             raise AttributeError(*e.args)
-
 
 u = pycognito.Cognito(
     user_pool_id='us-east-1_GUFWfhI7g',
