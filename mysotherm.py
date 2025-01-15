@@ -85,11 +85,30 @@ for did, d in devices.items():
                     v = f'{32+vd.v*9/5:.1f}°F'
                 else:
                     v = f'{vd.v}°C'
-            elif k in ('Humidity', 'Brightness'):
-                v = f'{vd.v}%'
             elif k == 'Timestamp':
                 # I'm not sure what this timestamp is, exactly
                 v = datetime.fromtimestamp(vd.v, tz=tz)
+            elif k == 'Current':
+                if d.Model == 'BB-V2-0-L':
+                    # From an email from Mysa support:
+                    # "the Mysa V2 LITE model you have does not have a current sensor, so if there is an open load issues, it will not display the H2 error."
+                    if vd.v == 0:
+                        v = 'None (DEVICE HAS NO CURRENT SENSOR)'
+                    else:
+                        v = f'{vd.v:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
+                else:
+                    v = f'{vd.v:.2} A'
+            elif k == 'Brightness': v = f'{vd.v}%'
+            elif k == 'Voltage':    v = f'{vd.v} V'
+            elif k == 'Rssi':       v = vd.v and f'{vd.v} dBm'
+            elif k == 'Humidity':
+                v = f'{vd.v}%'
+                if d.Model == 'BB-V2-0-L':
+                    # The Mysa Lite does not advertise a humidity sensor, and the app does not *show* a humidity sensor,
+                    # but the device reports a humidity reading which moves up and down when I hold a cup of steaming hot water
+                    # under it. The sensor might be on-chip but uncalibrated and unexposed.
+                    # https://guides.getmysa.com/help/mysa-for-electric-baseboard-heaters-v1-and-v2/t/cl3uk6csw1479029ejm93kn4q631
+                    v += ' (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
             else:
                 v = vd.v
 
