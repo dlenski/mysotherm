@@ -56,11 +56,14 @@ firmware = s.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmwa
 
 for did, d in devices.items():
     assert did == d.Id
-    print(f'{d.Name} (model {d.Model!r}, id {d.Id!r}, firmware {firmware[did].InstalledVersion}):')
+    # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
+    mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
+    print(f'{d.Name} (model {d.Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
     tz = pytz.timezone(d.TimeZone)
     if (s := states.get(did)) is None:
         print('  No state found!')
     else:
+        assert did == s.pop('Device')
         mints, maxts = 1<<32, 0
         width = max(len(k) for k in s)
         for k, vd in sorted(s.items()):
