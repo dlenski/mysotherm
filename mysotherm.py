@@ -4,6 +4,7 @@ from datetime import datetime
 import base64
 import logging
 import os
+from pprint import pprint
 from urllib.parse import urlparse, urlunparse, quote
 
 # boto3 is stupid AF and by default it wastes 1 second trying to connect to EC2 metadata
@@ -22,6 +23,7 @@ import requests
 logging.basicConfig(format='[%(levelname)s:%(name)s] %(asctime)s - %(message)s',
     level=os.environ.get('LOGLEVEL', 'INFO').strip().upper())
 logging.getLogger('urllib3').setLevel(logging.DEBUG)
+logging.getLogger('websockets.client').setLevel(logging.DEBUG)
 
 
 p = ArgumentParser()
@@ -46,6 +48,7 @@ os.environ['COGNITO_JWKS'] = '{"keys":[{"alg":"RS256","e":"AQAB","kid":"udQ2TtD4
 
 # pycognito neatly wraps PART OF what we need here
 bsess = boto3.session.Session(region_name='us-east-1')
+#print(type(c))
 u = pycognito.Cognito(
     user_pool_id='us-east-1_GUFWfhI7g',
     client_id='19efs8tgqe942atbqmot5m36t3',
@@ -205,21 +208,25 @@ req.url += '&X-Amz-Security-Token=' + quote(cred.token)  # Plunk the session ont
 
 # Let us touch the horrid boto3/AWS interfaces no more.
 
-print(sess.request(
-    method=req.method,
-    url=req.url,
-    data=req.body,
-    headers={**req.headers,
-        # These are necessary headers ()
-        'Sec-WebSocket-Protocol':    'mqtt',
-        'Upgrade':                   'websocket',
-        'Connection':                'Upgrade',
-        'Sec-WebSocket-Key':         base64.b64encode(os.getrandom(16)).decode(),
-        'Sec-WebSocket-Version':     '13',
+from websockets.sync.client import connect
+from uuid import uuid1
+from time import sleep
+import mqttpacket.v311 as mqttpacket
 
-        # Not strictly necessary, but Mysa official client adds it
-        'Sec-WebSocket-Extensions':  'permessage-deflate',
-        'origin':                    mqtt_urlp._replace(path='').geturl(),
-        'Accept-Encoding':           'gzip',
-        'User-Agent':                'okhttp/4.11.0',
-    }))
+with connect(
+    urlparse(req.url)._replace(scheme='wss').geturl(),
+    # We get 426 errors without the Sec-WebSocket-Protocol header:
+    subprotocols=('mqtt',),
+    # Seemingly not necessary for the server, but Mysa official client adds all this:
+    origin=mqtt_urlp._replace(path='').geturl(),
+    additional_headers=sess.headers,
+    #user_agent_header=sess.headers['user-agent'],
+) as ws:
+    ws.send(mqttpacket.connect(str(uuid1())))
+    sleep(1)
+    ws.send(mqttpacket.subscribe(10, [
+        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01) for did in devices]
+        ))
+
+    for msg in ws:
+        print(msg)
