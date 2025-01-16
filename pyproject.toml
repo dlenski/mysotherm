@@ -9,10 +9,12 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.9"
 requests = "^2"
-pycognito = "^2024"
+pycognito = "^2024.05"
 pytz = "^2024"
 # unclear why, but poetry can't resolve pycognito unless this (transitive) dependence is listed explicitly
 boto3 = "*"
+websockets = "^14.1"
+mqttpacket = {git = "https://github.com/jlitzingerdev/mqttpacket"}
 
 [build-system]
 requires = ["poetry-core"]
