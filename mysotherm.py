@@ -1,6 +1,14 @@
 #!/bin/env python3
 from argparse import ArgumentParser
 from datetime import datetime
+import os
+
+# boto3 is stupid AF and by default it wastes 1 second trying to connect to EC2 metadata
+# every single time you run it, unless you set these environment variables
+# https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html
+os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'        # <-- only works if boto3 hasn't yet been imported 🤬
+#os.environ['AWS_METADATA_SERVICE_NUM_ATTEMPTS'] = '0'  # <-- works even after boto3 imported
+#os.environ['AWS_METADATA_SERVICE_TIMEOUT'] = '0'       # <-- redundant, unnecessary
 
 import pycognito
 import pytz
@@ -21,6 +29,11 @@ class slurpy(dict):
             return self[k]
         except KeyError as e:
             raise AttributeError(*e.args)
+
+
+# It needs to fetch https://cognito-idp.us-east-1.amazonaws.com/us-east-1_GUFWfhI7g/.well-known/jwks.json,
+# unless we cache it in this environment variable.
+os.environ['COGNITO_JWKS'] = '{"keys":[{"alg":"RS256","e":"AQAB","kid":"udQ2TtD4g3Jc3dORobozGYu/T3qqcCtJonq0dwcrF8g=","kty":"RSA","n":"pwNwcNWr0CWijS_RlmooyzRq5Ud5GBDXKiTtS_4TV9MkXmxctKwiLFa_wnWsPw2B_RyQ6aY06de1qzylabuGcDQBpWFjmSWBoMiAFa2Facbhr4RnElLrs5MZTI3KZPVQlQaL0vvOERWC-3qe3HIG3EeaPyciSXS4aB2ldZCdLd2vtVJNwlzroqKiptXay9AeyQwiF6Tk2CXq4XZ3bcC5sFl53XjofoXXyZCrkBDjHBppE9Rhm0aw7u3DSozPbkiAEK-x92xQZ-Ymrl1eTLL4J08KiBdog2gVWYJqM9DdJ1T0rTBNXxNKgpnP9M83KnN8ViRgayBfLlyLpOOFaFK5lw","use":"sig"},{"alg":"RS256","e":"AQAB","kid":"f5vP7g+ehnb4PP+90i1WVsnUNfccQZVReBmaRvrHga0=","kty":"RSA","n":"nKGdPVq3wzz8Cy8tLwZ7OP44avSrNf-fcvqLV-lRG-9ziZavn4L7an2KZy_MDmdxBSekVDUoERAJNhNRlLFVRt_ialnUwkuZw0hkzeVyRT50-jE1bieF4I_zjOm7t_QhJTMoLG2KuDZcaGZa5RpDXZJGwPGKxcFjpH_VwgxFDwlTYPc2BjofuW8OwKNdm1CMNstG94pxGZoRuak_wd3Sg20DXH1c43kmHCiy4Ish-3oVHYMhVNv-pra02HXr-fJv8Rd7E0nVfw_Iki8MfWE6C5NunMCx74rigHbMMKZrzQtnB4EdxlcqZWjkC_5Qd1AhM6-gYchXMCKq18COrPPR1w","use":"sig"}]}'
 
 u = pycognito.Cognito(
     user_pool_id='us-east-1_GUFWfhI7g',
