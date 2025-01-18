@@ -110,10 +110,16 @@ for did, d in devices.items():
                     else:
                         v = f'{vd.v:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
                 else:
-                    v = f'{vd.v:.2} A'
+                    v = f'{vd.v:.2} A (HIGHEST CURRENT SEEN)'
+            elif k == 'Duty':
+                if d.Model == 'BB-V2-0-L' and vd.v in (0, 1):
+                    v = f'{"On" if vd.v else "Off":4} (DEVICE HAS NO CURRENT SENSOR)'
+                else:
+                    v = f'{vd.v*100.0:.0f}% (OF HIGHEST CURRENT)'
             elif k == 'Brightness': v = f'{vd.v}%'
             elif k == 'Voltage':    v = f'{vd.v} V'
             elif k == 'Rssi':       v = vd.v and f'{vd.v} dBm'
+            elif k == 'Lock':       v = bool(vd.v) if vd.v in (0, 1) else vd.v
             elif k == 'Humidity':
                 v = f'{vd.v}%'
                 if d.Model == 'BB-V2-0-L':
