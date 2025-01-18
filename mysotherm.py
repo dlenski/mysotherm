@@ -2,6 +2,7 @@
 from argparse import ArgumentParser
 from datetime import datetime
 import base64
+import json
 import logging
 import os
 from pprint import pprint
@@ -29,6 +30,7 @@ logging.getLogger('websockets.client').setLevel(logging.DEBUG)
 p = ArgumentParser()
 p.add_argument('-u', '--user', help='Mysa username')
 p.add_argument('-p', '--password', help='Mysa password')
+p.add_argument('-d', '--device', type=lambda s: s.replace(':', '').lower(), help='Specific device ID (MAC address)')
 args = p.parse_args()
 
 # Quacks like a dict and an object (https://github.com/dlenski/wtf/blob/master/wtf.py#L10C1-L19C1),
@@ -73,9 +75,16 @@ sess.headers.update({
 
 BASE_URL='https://app-prod.mysa.cloud'
 
+#users = sess.get(f'{BASE_URL}/users').json(object_hook=slurpy).User
 devices = sess.get(f'{BASE_URL}/devices').json(object_hook=slurpy).DevicesObj
 states = sess.get(f'{BASE_URL}/devices/state').json(object_hook=slurpy).DeviceStatesObj
 firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmware
+if False:
+    pprint(users)
+    pprint(devices)
+    pprint(states)
+    pprint(firmware)
+
 # Have also seen:
 #   GET /devices/capabalities (empty for me)
 #   GET /devices/drstate (empty for me)
@@ -84,6 +93,9 @@ firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Fir
 #   POST /energy/setpoints/device/{device_id} (-> mystifyingly, this is NOT setting the device setpoint, only reading it?? payload={"PhoneTimezone": "America/Vancouver", "Scope": "Day","Timestamp": 1736700658}
 
 for did, d in devices.items():
+    if args.device not in (None, did):
+        continue
+
     assert did == d.Id
     # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
     mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
@@ -126,7 +138,7 @@ for did, d in devices.items():
                     else:
                         v = f'{vd.v:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
                 else:
-                    v = f'{vd.v:.2} A (HIGHEST CURRENT SEEN)'
+                    v = f'{vd.v*1.0:.2} A (HIGHEST CURRENT SEEN)'
             elif k == 'Duty':
                 if d.Model == 'BB-V2-0-L' and vd.v in (0, 1):
                     v = f'{"On" if vd.v else "Off":4} (DEVICE HAS NO CURRENT SENSOR)'
@@ -222,7 +234,7 @@ with connect(
     additional_headers=sess.headers,
     #user_agent_header=sess.headers['user-agent'],
 ) as ws:
-    ws.send(mqttpacket.connect(str(uuid1())))
+    ws.send(mqttpacket.connect(str(uuid1()), 3600))
     _, l = mqttpacket.parse(ws.recv())
 
     for did in ((args.device,) if args.device else devices):
