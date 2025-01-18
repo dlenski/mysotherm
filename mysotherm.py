@@ -223,10 +223,24 @@ with connect(
     #user_agent_header=sess.headers['user-agent'],
 ) as ws:
     ws.send(mqttpacket.connect(str(uuid1())))
-    sleep(1)
-    ws.send(mqttpacket.subscribe(10, [
-        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01) for did in devices]
-        ))
+    _, l = mqttpacket.parse(ws.recv())
+
+    for did in ((args.device,) if args.device else devices):
+        ws.send(mqttpacket.subscribe(10, [
+            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
+            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
+            ]))
+        _, l = mqttpacket.parse(ws.recv())
+        pprint(l)
 
     for msg in ws:
-        print(msg)
+        _, l = mqttpacket.parse(bytearray(msg))
+        for msg in l:
+            if isinstance(msg, mqttpacket.PublishPacket):
+                did, direction = msg.topic.split('/')[-2:]
+                direction = '====>' if direction == 'in' else '<===='
+                mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
+                print(f'QOS={msg.qos} Retain={msg.retain} Dup={msg.dup} {direction} {devices[did].Name} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+                pprint(json.loads(msg.payload))
+            else:
+                pprint(msg)
