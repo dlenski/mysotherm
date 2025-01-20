@@ -115,6 +115,18 @@ after the setpoint has changed?
  "Timestamp": $UNIXTIME}
  ```
 
+## Firmware report?
+
+Sent by devices to `/v1/dev/$DID/out` with QOS=0. Unsure what triggers it:
+
+```json
+ {"Device": "$DID",
+ "Level": "INFO",
+ "Message": "api got version 3.16.2.3",
+ "MsgType": 4,
+ "Timestamp": $UNIXTIME}
+```
+
  ## Change setpoint or mode
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1:
