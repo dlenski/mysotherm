@@ -13,6 +13,7 @@ import requests
 
 from .util import slurpy
 from . import mysa_stuff
+from .mysa_stuff import BASE_URL
 from .aws import boto3, botocore, Cognito
 
 
@@ -21,26 +22,21 @@ logging.basicConfig(format='[%(levelname)s:%(name)s] %(asctime)s - %(message)s',
 logger = logging.getLogger(__name__)
 
 p = ArgumentParser()
-p.add_argument('-u', '--user', help='Mysa username')
-p.add_argument('-p', '--password', help='Mysa password')
+p.add_argument('-u', '--user', help='Mysa username', required=True)
+p.add_argument('-p', '--password', help='Mysa password', required=True)
 p.add_argument('-d', '--device', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
+p.add_argument('-W', '--no-watch', action='store_true', help="Just print device status, don't watch for realtime MQTT messages")
 args = p.parse_args()
 
-
-# pycognito neatly wraps PART OF what we need here
+# Authenticate with pycognito
 bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
-#print(type(c))
-
-logger.info("Running pycognito.Cognito()")
 u = Cognito(
     user_pool_id=mysa_stuff.USER_POOL_ID,
     client_id=mysa_stuff.CLIENT_ID,
     username=args.user,
     session=bsess,
     pool_jwk=mysa_stuff.JWKS)
-logger.info("Running pycognito.Cognito.authenticate() with password")
 u.authenticate(password=args.password)
-#pprint(vars(u))
 
 assert u.token_type == 'Bearer'
 sess = requests.Session()
@@ -52,10 +48,11 @@ sess.headers.update(
     **mysa_stuff.CLIENT_HEADERS
 )
 
-
-devices = sess.get(f'{mysa_stuff.BASE_URL}/devices').json(object_hook=slurpy).DevicesObj
-states = sess.get(f'{mysa_stuff.BASE_URL}/devices/state').json(object_hook=slurpy).DeviceStatesObj
-firmware = sess.get(f'{mysa_stuff.BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmware
+# Fetch a bunch of status info
+user = sess.get(f'{BASE_URL}/users').json(object_hook=slurpy).User
+devices = sess.get(f'{BASE_URL}/devices').json(object_hook=slurpy).DevicesObj
+states = sess.get(f'{BASE_URL}/devices/state').json(object_hook=slurpy).DeviceStatesObj
+firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmware
 # Have also seen:
 #   GET /devices/capabalities (empty for me)
 #   GET /devices/drstate (empty for me)
@@ -106,7 +103,7 @@ for did, d in devices.items():
                     if vd.v == 0:
                         v = 'None (DEVICE HAS NO CURRENT SENSOR)'
                     else:
-                        v = f'{vd.v:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
+                        v = f'{vd.v*1.0:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
                 else:
                     v = f'{vd.v*1.0:.2} A (HIGHEST CURRENT SEEN)'
             elif k == 'Duty':
@@ -135,8 +132,10 @@ for did, d in devices.items():
             maxts = datetime.fromtimestamp(maxts, tz=tz)
             print(f'  Last updates between {mints} - {maxts}')
 
-#p.exit(0)
+if args.no_watch:
+    p.exit(0)
 
+# Get AWS credentials with cognito-identity
 cred = u.get_credentials(identity_pool_id="us-east-1:ebd95d52-9995-45da-b059-56b865a18379")
 
 # Now we need to use these credentials to do a "SigV4 presigning" of the target URL that
