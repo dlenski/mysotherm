@@ -32,13 +32,14 @@ p = ArgumentParser(description=
     estimated energy usage to the servers. TODO: Figure out how to report
     this to the server in a form it will accept, by estimating from the
     relay on/off signals.''')
-p.add_argument('-u', '--user', help='Mysa username')
-p.add_argument('-p', '--password', help='Mysa password')
+p.add_argument('-u', '--user', help='Mysa username', required=True)
+p.add_argument('-p', '--password', help='Mysa password', required=True)
 p.add_argument('-d', '--device', action='append', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
 p.add_argument('-C', '--current', type=float, help="Estimated max current level (in Amperes). Mysa V2 Lite devices don't have current sensors.")
 p.add_argument('-R', '--reset', action='store_true', help='Just reset faked Mysa Lite devices, and exit')
 args = p.parse_args()
 
+# Authenticate with pycognito
 bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
 u = Cognito(
     user_pool_id=mysa_stuff.USER_POOL_ID,
