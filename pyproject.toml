@@ -14,7 +14,7 @@ pytz = "^2024"
 # unclear why, but poetry can't resolve pycognito unless this (transitive) dependence is listed explicitly
 boto3 = "*"
 websockets = "^14.1"
-mqttpacket = {git = "https://github.com/dlenski/mqttpacket", branch = "modernize"}
+mqttpacket = {git = "https://github.com/dlenski/mqttpacket", rev = "6984add"}
 
 [build-system]
 requires = ["poetry-core"]

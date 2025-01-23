@@ -162,7 +162,7 @@ with connect(
     user_agent_header=sess.headers['user-agent'],
 ) as ws:
     ws.send(mqttpacket.connect(str(uuid1()), 3600))
-    _, l = mqttpacket.parse(ws.recv())
+    l = mqttpacket.parse_one(ws.recv())
     pprint(l)
 
     for did in ((args.device,) if args.device else devices):
@@ -170,17 +170,16 @@ with connect(
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
             ]))
-        _, l = mqttpacket.parse(ws.recv())
+        l = mqttpacket.parse_one(ws.recv())
         pprint(l)
 
-    for msg in ws:
-        _, l = mqttpacket.parse(bytearray(msg))
-        for msg in l:
-            if isinstance(msg, mqttpacket.PublishPacket):
-                did, direction = msg.topic.split('/')[-2:]
-                direction = '====>' if direction == 'in' else '<===='
-                mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
-                print(f'QOS={msg.qos} Retain={msg.retain} Dup={msg.dup} {direction} {devices[did].Name} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
-                pprint(json.loads(msg.payload))
-            else:
-                pprint(msg)
+    for wspkt in ws:
+        msg = mqttpacket.parse_one(wspkt)
+        if isinstance(msg, mqttpacket.PublishPacket):
+            did, direction = msg.topic.split('/')[-2:]
+            direction = '====>' if direction == 'in' else '<===='
+            mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
+            print(f'QOS={msg.qos} Retain={msg.retain} Dup={msg.dup} {direction} {devices[did].Name} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+            pprint(json.loads(msg.payload))
+        else:
+            pprint(msg)

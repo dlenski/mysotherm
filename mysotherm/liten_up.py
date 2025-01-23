@@ -110,7 +110,7 @@ with connect(
 ) as ws:
     ws.send(mqttpacket.connect(str(uuid1()), 60))
     timeout = time() + 60
-    _, (pkt, *_) = mqttpacket.parse(ws.recv())
+    pkt = mqttpacket.parse_one(ws.recv())
     assert isinstance(pkt, mqttpacket.ConnackPacket)
 
     # Subscribe to feeds for these devices
@@ -120,7 +120,7 @@ with connect(
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
             ]))
         timeout = time() + 60
-        _, (pkt, *_) = mqttpacket.parse(ws.recv())
+        pkt = mqttpacket.parse_one(ws.recv())
         assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
     try:
@@ -133,7 +133,7 @@ with connect(
         # Await messages and translate as needed
         while True:
             try:
-                _, (pkt, *_) = mqttpacket.parse(ws.recv(timeout - time()))
+                pkt = mqttpacket.parse_one(ws.recv(timeout - time()))
                 logging.debug(f'Received packet: {pkt}')
             except TimeoutError:
                 pkt = None
