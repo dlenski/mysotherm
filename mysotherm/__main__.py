@@ -1,12 +1,14 @@
 #!/bin/env python3
 from argparse import ArgumentParser
 from datetime import datetime
+from itertools import chain
 import base64
 import json
 import logging
 import os
 from pprint import pprint
 from urllib.parse import urlparse, urlunparse, quote
+from time import time
 
 import pytz
 import requests
@@ -60,9 +62,12 @@ firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Fir
 #   PATCH /users/{user_uuid} (-> set app info)
 #   POST /energy/setpoints/device/{device_id} (-> mystifyingly, this is NOT setting the device setpoint, only reading it?? payload={"PhoneTimezone": "America/Vancouver", "Scope": "Day","Timestamp": 1736700658}
 
+if args.device is not None:
+    if args.device not in devices:
+        p.error("Device {did} not found in your account.")
+    devices = {args.device: devices[args.device]}
+
 for did, d in devices.items():
-    if args.device not in (None, did):
-        continue
     assert did == d.Id
     # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
     mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
@@ -135,6 +140,8 @@ for did, d in devices.items():
 if args.no_watch:
     p.exit(0)
 
+print("Connecting to MQTT endpoint to watch real-time messages...")
+
 # Get AWS credentials with cognito-identity
 cred = u.get_credentials(identity_pool_id="us-east-1:ebd95d52-9995-45da-b059-56b865a18379")
 
@@ -161,25 +168,66 @@ with connect(
     additional_headers={'accept-encoding': 'gzip'},
     user_agent_header=sess.headers['user-agent'],
 ) as ws:
-    ws.send(mqttpacket.connect(str(uuid1()), 3600))
-    l = mqttpacket.parse_one(ws.recv())
-    pprint(l)
+    ws.send(mqttpacket.connect(str(uuid1()), 60))
+    assert isinstance(mqttpacket.parse_one(ws.recv()), mqttpacket.ConnackPacket)
 
-    for did in ((args.device,) if args.device else devices):
-        ws.send(mqttpacket.subscribe(10, [
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
-            ]))
-        l = mqttpacket.parse_one(ws.recv())
-        pprint(l)
+    subs = list(chain.from_iterable((
+        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
+        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
+    ) for did in devices))
+    ws.send(mqttpacket.subscribe(1, subs))
+    assert isinstance((l := mqttpacket.parse_one(ws.recv())), mqttpacket.SubackPacket)
 
-    for wspkt in ws:
-        msg = mqttpacket.parse_one(wspkt)
-        if isinstance(msg, mqttpacket.PublishPacket):
-            did, direction = msg.topic.split('/')[-2:]
-            direction = '====>' if direction == 'in' else '<===='
-            mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
-            print(f'QOS={msg.qos} Retain={msg.retain} Dup={msg.dup} {direction} {devices[did].Name} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
-            pprint(json.loads(msg.payload))
+    print("Connected to MQTT endpoint and subscribed to device in/out message...")
+
+    timeout = time() + 60
+    while True:
+        try:
+            msg = mqttpacket.parse_one(ws.recv(timeout - time()))
+            logging.debug(f'Received packet: {msg}')
+        except TimeoutError:
+            pkt = None
+            ws.send(mqttpacket.pingreq())
+            logging.debug(f"Sent PINGREQ keepalive packet")
+            timeout = time() + 60
         else:
-            pprint(msg)
+            if isinstance(msg, mqttpacket._packet.PingrespPacket):
+                pass
+            elif isinstance(msg, mqttpacket.PublishPacket):
+                did, direction = msg.topic.split('/')[-2:]
+                arrow = 'TO ==>' if direction == 'in' else 'FROM <=='
+                mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
+                deets = ''.join(filter(None, [
+                    msg.qos and f' QOS={msg.qos}',
+                    msg.retain and ' +retain',
+                    msg.dup and ' +dup',
+                ]))
+                j = json.loads(msg.payload, object_hook=slurpy)
+
+                understood = False
+
+                if j.get('MsgType') == 11 and direction == 'in' and j.get('Device') == did:
+                        understood = f'App asking device for its status ({time() - j.get("Timestamp"):.0f} s ago, {j.get("Timeout")} s timeout)'
+                elif j.get('MsgType') == 0 and direction == 'out' and j.get('Device') == did and j.get('Stream') == 1:
+                    del j['MsgType']
+                    del j['Device']
+                    del j['Stream']
+                    ts = j.pop('Timestamp')
+                    understood = f'Device (V1?) reporting its status {time() - ts:.0f} s ago: {json.dumps(j)}'
+                elif j.get('msg') == 40 and direction == 'out' and j.get('src') == {'ref': did, 'type': 1} and j.get('ver') == '1.0':
+                    ts = j.pop('time')
+                    understood = f'Device (V2?) reporting its status {time() - ts:.0f} s ago: {json.dumps(j.get('body'))}'
+                elif j.get('MsgType') == 1 and direction == 'out':
+                    del j['MsgType']
+                    del j['Device']
+                    ts = j.pop('Timestamp')
+                    understood = f'Unclear prev/next message from device {tim() - ts:.0f} s ago: {json.dumps(j)}'
+
+                print(f'{arrow} {devices[did].Name}{deets} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+                print(understood or json.dumps(json.loads(msg.payload)))
+
+                if msg.qos > 0:
+                    ws.send(mqttpacket.puback(msg.packetid))
+                    timeout = time() + 60
+            else:
+                pprint(msg)
