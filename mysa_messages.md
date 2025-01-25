@@ -44,7 +44,11 @@ The `Duty` value in `/devices/state` is very laggy compared to the `Current` see
 Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
 
 ```json
-{"body": {"ambTemp": 16.7, "dtyCycle": 1.0, "hum": 48.0, "stpt": 17.8},
+{"body": {"ambTemp": 16.7,   # I think this is "CorrectedTemp" in /devices/state
+          "dtyCycle": 1.0,   # = 1.0 when relay is on, 1.0 when off
+          "hum": 48.0,
+          "stpt": 17.8
+          },
  "id": ${large random number},     # 64-bits long?
  "msg": 40,
  "src": {"ref": "$DID", "type": 1},
@@ -52,7 +56,12 @@ Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
  "ver": "1.0"}
 ```
 
-The `Duty` value in `/devices/state` is very laggy compared to the `dtyCycle` seen here.
+**Mystery**: Unlike the V1 devices, above, there's no field in this output which appears
+to contain the uncorrected sensor temperature. Yet this device's uncorrected
+sensor temperature does appear in the `/devices/state` output; where does it come from?
+
+**Gripe**: The `Duty` value in `/devices/state` is very laggy compared to the `dtyCycle`
+seen here.
 
 ## "Check your settings"
 
@@ -136,7 +145,7 @@ Sent by app to `/v1/dev/$DID/in` with QOS=1:
 
 ```json
 {"Timestamp": $UNIXTIME,
- "body": {"cmd": [{"sp": 17, "tm": -1}], "type": $TYPE, "ver": 1},
+ "body": {"cmd": [{"sp": 17, "tm": -1}], "type": $TYPE, "ver": 1},  # sometimes also sent in a derpy version where cmd has been wrapped in a string
  "dest": {"ref": "$DID", "type": 1},
  "id": $UNIXTIMEMS,
  "msg": 44,
@@ -164,3 +173,51 @@ Thermostat responds on `/v1/dev/$DID/out` with QOS=0:
 Instead of changing the setpoint (`"sp": $TEMP`) this can be used to change
 the mode with `"md": 1` to turn off and `"md": 3` to turn on. These appear
 to correspond to the `TstatMode` values seen in the `/devices/state` API.
+
+## Delete schedule
+
+Sent by app to `/v1/dev/$DID/in` with QOS=0:
+
+```json
+{"ver": "1.0", "id": $UNIXTIME,
+ "src": {"type": 302, "ref": ""},
+ "dest": {"type": 1, "ref": "$DID"},
+ "msg": 34, "time": $UNIXTIME,
+ "body": {"ver": "3.0.0", "hash": "", "events": [], "totalEvents": 0}}
+}
+```
+
+And also this version:
+
+```json
+{"ver": "1.0", "id": $UNIXTIME,
+ "src": {"type": 302, "ref": "$DID"},
+ "dest": {"type": 1, "ref": "$DID"},
+ "msg": 34, "time": $UNIXTIME,
+ "body": {"ver": "3.0.0", "hash": "ea85ca7", "events": [], "totalEvents": 0}}
+```
+
+## Set schedule
+
+Sent by app to `/v1/dev/$DID/in` with QOS=0:
+
+```json
+{"ver": "1.0", "id": $UNIXTIME,
+ "src": {"type": 302, "ref": "223a5fcc-1b43-435e-9f37-7f99353cc805"},   # What is this UUID?
+ "dest": {"type": 1, "ref": "$DID"},
+ "msg": 34, "time": $UNIXTIME,
+ "body": {
+   "ver": "3.0.0", "hash": "f07d791",
+   "events": ["1|0|1980|3|18.5|%|%|%|%|%",   # 1980 minutes = 33 hours in the week = Monday 9 am ("3|18.5" = on to 18.5°C)
+              "1|1|2400|1|%|%|%|%|%|%",      # 2400 minutes = Monday 4 pm ("1|%" = off)
+              "1|2|3420|3|18.5|%|%|%|%|%",
+              "1|3|3840|1|%|%|%|%|%|%",
+              "1|4|4860|3|18.5|%|%|%|%|%",
+              "1|5|5280|1|%|%|%|%|%|%",
+              "1|6|6300|3|18.5|%|%|%|%|%",
+              "1|7|6720|1|%|%|%|%|%|%",
+              "1|8|7740|3|18.5|%|%|%|%|%",  # 7740 minutes = Friday 9 am ("3|18.5" = on to 18.5°C)
+              "1|9|8160|1|%|%|%|%|%|%"],    # 8160 minutes = Friday 4 pm ("1|%" = off)
+   "totalEvents": 10, "createTime": 1737784923
+}}
+```

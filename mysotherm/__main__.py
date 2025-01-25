@@ -182,6 +182,7 @@ with connect(
 
     timeout = time() + 60
     while True:
+        now = time()
         try:
             msg = mqttpacket.parse_one(ws.recv(timeout - time()))
             logging.debug(f'Received packet: {msg}')
@@ -189,42 +190,77 @@ with connect(
             pkt = None
             ws.send(mqttpacket.pingreq())
             logging.debug(f"Sent PINGREQ keepalive packet")
-            timeout = time() + 60
+            timeout = now + 60
         else:
             if isinstance(msg, mqttpacket._packet.PingrespPacket):
                 pass
             elif isinstance(msg, mqttpacket.PublishPacket):
                 did, direction = msg.topic.split('/')[-2:]
-                arrow = 'TO ==>' if direction == 'in' else 'FROM <=='
+                arrow = 'TO   ==>' if direction == 'in' else 'FROM <=='
                 mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
                 deets = ''.join(filter(None, [
                     msg.qos and f' QOS={msg.qos}',
                     msg.retain and ' +retain',
                     msg.dup and ' +dup',
                 ]))
-                j = json.loads(msg.payload, object_hook=slurpy)
 
-                understood = False
+                understood = ts = None
 
-                if j.get('MsgType') == 11 and direction == 'in' and j.get('Device') == did:
-                        understood = f'App asking device for its status ({time() - j.get("Timestamp"):.0f} s ago, {j.get("Timeout")} s timeout)'
-                elif j.get('MsgType') == 0 and direction == 'out' and j.get('Device') == did and j.get('Stream') == 1:
-                    del j['MsgType']
-                    del j['Device']
-                    del j['Stream']
-                    ts = j.pop('Timestamp')
-                    understood = f'Device (V1?) reporting its status {time() - ts:.0f} s ago: {json.dumps(j)}'
-                elif j.get('msg') == 40 and direction == 'out' and j.get('src') == {'ref': did, 'type': 1} and j.get('ver') == '1.0':
-                    ts = j.pop('time')
-                    understood = f'Device (V2?) reporting its status {time() - ts:.0f} s ago: {json.dumps(j.get('body'))}'
-                elif j.get('MsgType') == 1 and direction == 'out':
-                    del j['MsgType']
-                    del j['Device']
-                    ts = j.pop('Timestamp')
-                    understood = f'Unclear prev/next message from device {tim() - ts:.0f} s ago: {json.dumps(j)}'
+                try:
+                    j = json.loads(msg.payload, object_hook=slurpy)
+                    if (mt := j.pop('MsgType', None)) is not None:
+                        assert j.pop('Device') == did
+                        ts = j.pop('Timestamp')
+                        if mt == 11 and direction == 'in':
+                            understood = f'App telling device to publish its status ({json.dumps(j)})'
+                        elif mt == 6 and direction == 'in':
+                            understood = f'App telling device to check its settings ({json.dumps(j)})'
+                        elif mt == 0 and direction == 'out':
+                            assert j.pop('Stream') == 1
+                            understood = f'Device (V1?) reporting its status: {json.dumps(j)}'
+                        elif mt == 1 and direction == 'out':
+                            understood = f'Unclear prev/next message from device: {json.dumps(j)}'
+                    elif (mt := j.pop('msg')) is not None:
+                        if mt == 40:
+                            assert j.pop('ver') == '1.0'
+                            assert j.pop('src') == {'ref': did, 'type': 1}
+                            ts = j.pop('time')
+                            body = j.pop('body')
+                            understood = f'Device (V2?) reporting its status: {json.dumps(body)}'
+                        elif mt == 44 and direction == 'in':
+                            ts = j.pop('id') / 1000
+                            assert j.pop('ver') == '1.0'
+                            assert j.pop('dest') == {'ref': did, 'type': 1}
+                            assert j.pop('resp') == 2
+                            assert abs(j.pop('Timestamp') - int(ts)) <= 1   # Sometimes randomly off by 1 sec
+                            assert j.pop('time') == int(ts)
+                            assert 'timestamp' not in j or j.pop('timestamp') == int(ts)
+                            src = j.pop('src')
+                            if src == {'ref': user.Id, 'type': 100}:
+                                by = 'You'
+                            elif src.type == 100:
+                                by = f'Other user {src.ref}'
+                            else:
+                                by = json.dumps(src)
+                            assert set(j.keys()) == {'body'}
+                            body = j.body
+                            assert body.pop('ver')
+                            understood = f'{by} commanding device: {json.dumps(body)}'
+                        elif mt == 44 and direction == 'out':
+                            ts = j.pop('time')
+                            assert j.pop('ver') == '1.0'
+                            assert j.pop('src') == {'ref': did, 'type': 1}
+                            assert abs(ts - j.pop('resp_id') / 1000) <= 5  # <=5 sec delay
+                            id_ = j.pop('id')
+                            assert set(j.keys()) == {'body'}
+                            body = j.body
+                            assert body.pop('success') == 1
+                            understood = f'Device responding to app command: {json.dumps(body)} (id={id_})'
+                except Exception:
+                    ts = time()
 
                 print(f'{arrow} {devices[did].Name}{deets} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
-                print(understood or json.dumps(json.loads(msg.payload)))
+                print('  ', understood or json.dumps(json.loads(msg.payload)))
 
                 if msg.qos > 0:
                     ws.send(mqttpacket.puback(msg.packetid))
