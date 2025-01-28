@@ -19,3 +19,7 @@ mqttpacket = {git = "https://github.com/dlenski/mqttpacket", rev = "6984add"}
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+mysotherm = "mysotherm.__main__:main"
+liten-up = "mysotherm.liten_up:main"
