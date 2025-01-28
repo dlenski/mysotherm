@@ -30,8 +30,12 @@ def main(args=None):
     p = ArgumentParser()
     p.add_argument('-u', '--user', help='Mysa username', required=True)
     p.add_argument('-p', '--password', help='Mysa password', required=True)
-    p.add_argument('-d', '--device', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
-    p.add_argument('-W', '--no-watch', action='store_true', help="Just print device status, don't watch for realtime MQTT messages")
+    p.add_argument('-d', '--device', action='append',
+                   type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address); may be repeated')
+    p.add_argument_group('Debugging options')
+    p.add_argument('-W', '--no-watch', action='store_true', help="Exit after printing status information, don't watch for realtime MQTT messages")
+    p.add_argument('--dump-lots', action='store_true', help='Dump JSON from a whole bunch of endpoints.')
+    p.add_argument('--dump-token', action='store_true', help='Dump access token and cURL command.')
     args = p.parse_args(args)
 
     # Authenticate with pycognito
@@ -54,22 +58,49 @@ def main(args=None):
         **mysa_stuff.CLIENT_HEADERS
     )
 
+    if args.dump_token:
+        print("Cognito ID token:")
+        print("=================")
+        print(u.id_token)
+        print("Cognito ID claims:")
+        print("==================")
+        pprint(u.id_claims)
+        print("cURL template:")
+        print("==============")
+        print(f"curl -H 'authorization: {u.id_token}' '{BASE_URL}'")
+
     # Fetch a bunch of status info
     user = sess.get(f'{BASE_URL}/users').json(object_hook=slurpy).User
     devices = sess.get(f'{BASE_URL}/devices').json(object_hook=slurpy).DevicesObj
     states = sess.get(f'{BASE_URL}/devices/state').json(object_hook=slurpy).DeviceStatesObj
     firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmware
     # Have also seen:
-    #   GET /devices/capabalities (empty for me)
+    #   GET /devices/capabilities (empty for me)
     #   GET /devices/drstate (empty for me)
     #   GET /homes, /homes/{home_uuid}, /users, /users/{user_uuid}, /schedules, etc (-> JSON)
     #   PATCH /users/{user_uuid} (-> set app info)
-    #   POST /energy/setpoints/device/{device_id} (-> mystifyingly, this is NOT setting the device setpoint, only reading it?? payload={"PhoneTimezone": "America/Vancouver", "Scope": "Day","Timestamp": 1736700658}
+    #   POST /energy/setpoints/device/{device_id} (-> this is NOT setting the device setpoint, only reading it. Payload is {"PhoneTimezone": "America/Vancouver", "Scope": "Day","Timestamp": 1736700658}
+    #   POST /energy/device/{device_id} (-> reading the device energy usage and temp/humidity readings. Same payload.)
+    #   GET /devices/state/{device_id}
 
-    if args.device is not None:
-        if args.device not in devices:
-            p.error("Device {did} not found in your account.")
-        devices = {args.device: devices[args.device]}
+    if args.dump_lots:
+        print("GET /users | .json() | .User")
+        print("============================")
+        pprint(user)
+        print("GET /devices | .json() | .DevicesObj")
+        print("====================================")
+        pprint(devices)
+        print("GET /devices/state | .json() | .DeviceStatesObj")
+        print("===============================================")
+        pprint(states)
+        print("GET /devices/firmware | .json() | .Firmware")
+        print("===========================================")
+        pprint(firmware)
+
+    if args.device:
+        if (missing := set(args.device) - set(devices)):
+            p.error(f"Device ID(s) {', '.join(missing)} not found in your Mysa account.")
+        devices = {did: devices[did] for did in args.device}
 
     for did, d in devices.items():
         assert did == d.Id
@@ -245,7 +276,8 @@ def main(args=None):
                                 assert set(j.keys()) == {'body'}
                                 body = j.body
                                 assert body.pop('ver')
-                                understood = f'{by} commanding device: {json.dumps(body)}'
+                                weird = ' (derpy stringified cmd)' if isinstance(body['cmd'], str) else ''
+                                understood = f'{by} commanding device{weird}: {json.dumps(body)}'
                             elif mt == 44 and direction == 'out':
                                 ts = j.pop('time')
                                 assert j.pop('ver') == '1.0'
@@ -258,6 +290,9 @@ def main(args=None):
                                 understood = f'Device responding to app command: {json.dumps(body)} (id={id_})'
                     except Exception:
                         ts = time()
+
+                    if understood and ts:
+                        understood = f'[{now - ts:.1f}s ago] ' + understood
 
                     print(f'{arrow} {devices[did].Name}{deets} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
                     print('  ', understood or json.dumps(json.loads(msg.payload)))
