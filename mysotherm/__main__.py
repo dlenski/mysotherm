@@ -204,7 +204,8 @@ def main(args=None):
 
         subs = list(chain.from_iterable((
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
+            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
+            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01),
         ) for did in devices))
         ws.send(mqttpacket.subscribe(1, subs))
         assert isinstance((l := mqttpacket.parse_one(ws.recv())), mqttpacket.SubackPacket)
@@ -226,8 +227,14 @@ def main(args=None):
                 if isinstance(msg, mqttpacket._packet.PingrespPacket):
                     pass
                 elif isinstance(msg, mqttpacket.PublishPacket):
-                    did, direction = msg.topic.split('/')[-2:]
-                    arrow = 'TO   ==>' if direction == 'in' else 'FROM <=='
+                    did, subtopic = msg.topic.split('/')[-2:]
+                    if subtopic == 'in':
+                        arrow = 'TO   ==>'
+                    elif subtopic == 'out':
+                        arrow = 'FROM <=='
+                    else:
+                        arrow = f'?{subtopic}?'
+                    arrow = 'TO   ==>' if subtopic == 'in' else 'FROM <=='
                     mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
                     deets = ''.join(filter(None, [
                         msg.qos and f' QOS={msg.qos}',
@@ -235,21 +242,24 @@ def main(args=None):
                         msg.dup and ' +dup',
                     ]))
 
-                    understood = ts = None
+                    understood = ts = orig_json = None
 
                     try:
                         j = json.loads(msg.payload, object_hook=slurpy)
+                        orig_json = j.copy()
                         if (mt := j.pop('MsgType', None)) is not None:
                             assert j.pop('Device') == did
                             ts = j.pop('Timestamp')
-                            if mt == 11 and direction == 'in':
+                            if mt == 11 and subtopic == 'in':
                                 understood = f'App telling device to publish its status ({json.dumps(j)})'
-                            elif mt == 6 and direction == 'in':
+                            elif mt == 6 and subtopic == 'in':
                                 understood = f'App telling device to check its settings ({json.dumps(j)})'
-                            elif mt == 0 and direction == 'out':
+                            elif mt == 4 and subtopic == 'out':
+                                understood = f'Device log [{j.Level}] {j.Message}'
+                            elif mt == 0 and subtopic == 'out':
                                 assert j.pop('Stream') == 1
                                 understood = f'Device (V1?) reporting its status: {json.dumps(j)}'
-                            elif mt == 1 and direction == 'out':
+                            elif mt == 1 and subtopic == 'out':
                                 understood = f'Unclear prev/next message from device: {json.dumps(j)}'
                         elif (mt := j.pop('msg')) is not None:
                             if mt == 40:
@@ -258,7 +268,7 @@ def main(args=None):
                                 ts = j.pop('time')
                                 body = j.pop('body')
                                 understood = f'Device (V2?) reporting its status: {json.dumps(body)}'
-                            elif mt == 44 and direction == 'in':
+                            elif mt == 44 and subtopic == 'in':
                                 ts = j.pop('id') / 1000
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('dest') == {'ref': did, 'type': 1}
@@ -278,7 +288,7 @@ def main(args=None):
                                 assert body.pop('ver')
                                 weird = ' (derpy stringified cmd)' if isinstance(body['cmd'], str) else ''
                                 understood = f'{by} commanding device{weird}: {json.dumps(body)}'
-                            elif mt == 44 and direction == 'out':
+                            elif mt == 44 and subtopic == 'out':
                                 ts = j.pop('time')
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('src') == {'ref': did, 'type': 1}
@@ -288,14 +298,33 @@ def main(args=None):
                                 body = j.body
                                 assert body.pop('success') == 1
                                 understood = f'Device responding to app command: {json.dumps(body)} (id={id_})'
+                            elif mt == 3 and subtopic == 'batch':
+                                ts = j.pop('time')
+                                assert j.pop('ver') == '1.0'
+                                assert j.pop('src') == {'ref': did, 'type': 1}
+                                id_ = j.pop('id')
+                                assert set(j.keys()) == {'body'}
+                                body = j.body
+                                readings = base64.b64decode(body.pop('readings'))
+                                assert not body
+                                understood = f'Device readings of length 0x{len(readings):04x}\n' + ''.join(f'  {ii:04x}  {readings[ii:ii+16].hex(" ", 8)}\n' for ii in range(0, len(readings), 16))
                     except Exception:
                         ts = time()
 
                     if understood and ts:
                         understood = f'[{now - ts:.1f}s ago] ' + understood
 
-                    print(f'{arrow} {devices[did].Name}{deets} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
-                    print('  ', understood or json.dumps(json.loads(msg.payload)))
+                    if did in devices:
+                        print(f'{arrow} {devices[did].Name}{deets} (model {devices[did].Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+                    else:
+                        print(f'{arrow} Unknown device {did} (topic {msg.topic})')
+
+                    if understood:
+                        print(f'  {understood}')
+                    elif orig_json:
+                        print(f'  {json.dumps(orig_json)}')
+                    else:
+                        print(f'  {msg.payload}')
 
                     if msg.qos > 0:
                         ws.send(mqttpacket.puback(msg.packetid))
