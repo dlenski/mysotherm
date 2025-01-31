@@ -2,10 +2,12 @@
 from argparse import ArgumentParser
 from datetime import datetime
 from itertools import chain
+from copy import deepcopy
 import base64
 import json
 import logging
 import os
+import struct
 from pprint import pprint
 from urllib.parse import urlparse, urlunparse, quote
 from time import time, sleep
@@ -232,9 +234,10 @@ def main(args=None):
                         arrow = 'TO   ==>'
                     elif subtopic == 'out':
                         arrow = 'FROM <=='
+                    elif subtopic == 'batch':
+                        arrow = 'FROM <=='    # these are always FROM the device, right?
                     else:
                         arrow = f'?{subtopic}?'
-                    arrow = 'TO   ==>' if subtopic == 'in' else 'FROM <=='
                     mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
                     deets = ''.join(filter(None, [
                         msg.qos and f' QOS={msg.qos}',
@@ -246,7 +249,7 @@ def main(args=None):
 
                     try:
                         j = json.loads(msg.payload, object_hook=slurpy)
-                        orig_json = j.copy()
+                        orig_json = deepcopy(j)
                         if (mt := j.pop('MsgType', None)) is not None:
                             assert j.pop('Device') == did
                             ts = j.pop('Timestamp')
@@ -303,11 +306,11 @@ def main(args=None):
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('src') == {'ref': did, 'type': 1}
                                 id_ = j.pop('id')
-                                assert set(j.keys()) == {'body'}
-                                body = j.body
+                                body = j.pop('body')
+                                assert not(j)
                                 readings = base64.b64decode(body.pop('readings'))
                                 assert not body
-                                understood = f'Device readings of length 0x{len(readings):04x}\n' + ''.join(f'  {ii:04x}  {readings[ii:ii+16].hex(" ", 8)}\n' for ii in range(0, len(readings), 16))
+                                understood = parse_readings(readings)
                     except Exception:
                         ts = time()
 
@@ -331,6 +334,42 @@ def main(args=None):
                         timeout = time() + 60
                 else:
                     pprint(msg)
+
+def parse_readings(readings: bytes):
+    if not readings.startswith(b'\xca\xa0'):
+        return f'Unknown-format device readings of length 0x{len(readings):04x}:\n' + ''.join(f'  {ii:04x}  {readings[ii:ii+16].hex(" ", 8)}\n' for ii in range(0, len(readings), 16))
+    offset = 0
+    ver = readings[2]
+    understood = f'Raw readings (v{ver}):\n'
+    while offset < len(readings):
+        assert readings[offset: offset+2] == b'\xca\xa0' # All should have same prefix
+        assert readings[offset+2] == ver                # ... and same version
+        offset += 3
+        sts, sens, amb, setp, hum, dty, onish, offish, heatsink, flags = struct.unpack_from('<Lhhhbbhhhh', readings, offset)
+        offset += 20
+        sens /= 10; amb /= 10; setp /= 10; heatsink /= 10   # Unit = 0.1°C
+        if ver == 3:   # BB-V2-0 / BB-V2-0-L
+            tu = 'ms'                               # Unit [of onish/offish] = 1 ms
+            always1, onoroff, voltage, current, always0, crc = struct.unpack_from('<bbhh3sB', readings, offset)
+            offset += 10
+            current *= 10                           # Unit = 10 mA
+            variant = f'one?={always1}, on|off={onoroff}, voltage={voltage}V, cur={current}mA, zero?={always0.hex()}, crc?={crc:08b}'
+        elif ver == 0:   # BB-V1-0
+            onish *= 100; offish *= 100; tu = 'ms'  # Unit = 100 ms
+            rssi, onoroff, crc = struct.unpack_from('<bbB', readings, offset)
+            offset += 3
+            rssi = -rssi                            # Unit = -1 dBm
+            variant = f'rssi={rssi} dBm, on|off={onoroff}, crc(?)={crc:08b}'
+        else:
+            # Unknown versions
+            # v4 = Air conditioners (offset += 20), v1 = Unknown (offset += 5)
+            tu = '?'                                                           # We don't know the time unit
+            if (end := readings.find(bytes((0xca, 0xa0, ver)), offset)) < 0:  # Hopefully no inadvertent matching bytes!!
+                end = len(radings)
+            variant = readings[offset:end].hex(' ', -4)
+            offset = end
+        understood += f'  {datetime.fromtimestamp(sts)}: sens={sens:.1f}°C, amb={amb:.1f}°C, setp={setp:.1f}°C, hum={hum}%, dty={dty}%, on?={onish}{tu}, off?={offish}{tu}, heatsink={heatsink:.1f}°C, flags?={flags:04x}, {variant}\n'
+    return understood
 
 if __name__ == '__main__':
     main()

@@ -26,7 +26,7 @@ Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
 
 ```json
 {"ComboTemp": 20.93,          # I think this is "SensorTemp" in /devices/state
- "Current": 0.0,              # This seems to be "the current right now" as opposed to "the highest current seen" reported in /devices/state
+ "Current": 0.0,              # This seems to be "the current right now" as opposed to "the highest current seen" reported in /devices/state; "DutyCycle" in /devices/state is the ratio of the two
  "Device": "$DID",
  "Humidity": 48.0,
  "MainTemp": 17.15,           # I think this is "CorrectedTemp" in /devices/state
@@ -221,3 +221,29 @@ Sent by app to `/v1/dev/$DID/in` with QOS=0:
    "totalEvents": 10, "createTime": 1737784923
 }}
 ```
+
+## Readings from device
+
+Sent by device to `/v1/dev/$DID/batch` with QOS=0:
+
+```json
+{"ver": "1.0",
+ "src": {"type": 1, "ref": "$DID"},
+ "time": $UNIXTIME,
+ "msg": 3,
+ "id": ${large random number},     # 64-bits long?
+ "body": {"readings": "$BASE64"}}
+```
+
+The "readings" are a binary data structure which contain raw (?) timestamped
+data from the devices' sensors, typically at 30 second intervals, and sent
+by the devices to the MQTT servers in batches covering 10-15 minutes typically.
+
+There are multiple variants/versions of the data structures in the readings;
+the first byte of each reading identifies its variant:
+
+- Mysa V1 Baseboard devices (BB-V1-1) send v0 readings
+- Mysa V2 Baseboard devices (BB-V2-0 and BB-V2-0-L "Lite") send v3 readings.
+
+See the `parse_readings` function for the gory details of what we know so
+far.
