@@ -1,3 +1,8 @@
+from dataclasses import dataclass, field
+from typing import Optional
+from datetime import datetime
+import struct
+
 from .aws import botocore
 
 REGION = 'us-east-1'
@@ -78,3 +83,97 @@ def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials):
         region_name='us-east-1').add_auth(req)
     req.params['X-Amz-Security-Token'] = cred.token  # Plunk the session into the URL after signing
     return req.prepare().url
+
+
+@dataclass
+class MysaReading:
+    '''Binary structure representing one raw reading from a Mysa thermostat device.
+    There are several versions/variants of this structure.
+
+    All of them appear to share a certain set of fields and meanings, but they vary
+    in additional fields and overall length.'''
+    ts: int                 # Unix time (seconds)
+    sensor_t: float         # Unit = °C
+    ambient_t: float        # Unit = °C
+    setpoint_t: float       # Unit = °C
+    heatsink_t: float       # Unit = °C
+    humidity: int           # Percent
+    duty: int               # Percent
+    on_ms: int              # Unit = 1 ms
+    off_ms: int             # Unit = 1 ms
+    unknown1: int           # Unknown 2 bytes: might be flags
+    rssi: int               # Unit = 1 dBm; frequently-but-not-always (???) stuck at 1 for BB-V2-0(-L) devices
+    onoroff: int            # Probably boolean, not int
+
+    rest: Optional[bytes]   # TRAILING bytes, overridden in child classes
+    ver: int                # LEADING version byte, overridden in child classes
+
+    @staticmethod
+    def parse_readings(readings: bytes) -> list['MysaReading']:
+        offset = 0
+        assert len(readings) >= 26
+        ver = readings[2]
+        output = []
+        while offset < len(readings):
+            assert readings[offset: offset+2] == b'\xca\xa0' # All should have same prefix
+            assert readings[offset+2] == ver                 # ... and same version
+            offset += 3
+            sts, sens, amb, setp, hum, duty, onish, offish, heatsink, unknown1, rssi, onoroff = struct.unpack_from('<LhhhbbhhhHbb', readings, offset)
+            offset += 22
+            sens /= 10; amb /= 10; setp /= 10; heatsink /= 10   # On-the-wire unit = 0.1°C
+            rssi = -rssi                                        # On-the-wire-unit = -1 dBm
+            if ver == 3:   # BB-V2-0 / BB-V2-0-L
+                voltage, current, always0, unknown2 = struct.unpack_from('<hh3sB', readings, offset)
+                offset += 8
+                current *= 10                           # On-the-wire unit = 10 mA
+                output.append(MysaReadingV3(sts, sens, amb, setp, heatsink, hum, duty, onish, offish, unknown1, rssi, onoroff,
+                    voltage=voltage, current=current, always0=always0, unknown2=unknown2))
+            elif ver == 0:   # BB-V1-0
+                onish *= 100; offish *= 100             # On-the-wire-unit = 100 ms for v0
+                unknown2, = struct.unpack_from('<B', readings, offset)
+                offset += 1
+                output.append(MysaReadingV0(sts, sens, amb, setp, heatsink, hum, duty, onish, offish, unknown1, rssi, onoroff,
+                    unknown2=unknown2))
+            else:
+                # Unknown versions
+                if (end := readings.find(bytes((0xca, 0xa0, ver)), offset)) < 0:  # Hopefully no inadvertent matching bytes!!
+                    end = len(readings)
+                output.append(MysaReading(sts, sens, amb, setp, heatsink, hum, duty, onish, offish, unknown1, rssi, onoroff,
+                    rest=readings[offset:end], ver=ver))
+#                variant = readings[offset:end].hex(' ', -4)
+                offset = end
+        return output
+
+    def __str__(self):
+        return (f'{datetime.fromtimestamp(self.ts)}: sens={self.sensor_t:.1f}°C, amb={self.ambient_t:.1f}°C, setp={self.setpoint_t:.1f}°C, '
+                f'hum={self.humidity}%, dty={self.duty}%, on?={self.on_ms}ms, off?={self.off_ms}ms, heatsink={self.heatsink_t:.1f}°C, '
+                f'unk1?={self.unknown1:04x}, rssi={self.rssi}{"" if self.rssi is None else "dBm"}, onoroff={self.onoroff}'
+                + ('' if self.rest is None else f', rest?={self.rest.hex()}'))
+
+@dataclass
+class MysaReadingV0(MysaReading):
+    '''Version 0 binary structure representing one raw reading from a Mysa thermostat device.
+
+    This version is used by the thermostat with model number BB-V1-0 ("Mysa Baseboard V1"),
+    and maybe others.'''
+    unknown2: int     # Unknown final byte: might be checksum or CRC?
+    ver: int = field(init=False, default=0, repr=False)
+    rest: Optional[bytes] = field(init=False, default=None, repr=False)
+    def __str__(self):
+        return super().__str__() + f', unk2?={self.unknown2:08b}'
+
+
+@dataclass
+class MysaReadingV3(MysaReading):
+    '''Version 0 binary structure representing one raw reading from a Mysa thermostat device.
+
+    This version is used by the thermostats with model number BB-V2-0 ("Mysa Baseboard V2")
+    and BB-V2-0-L ("Mysa V2 Lite"), and maybe others.'''
+    voltage: int      # Unit = 1 V
+    current: int      # Unit = 1 mA
+    always0: bytes    # Unknown 3 bytes, seemingly always zero
+    unknown2: int     # Unknown final bytes: might be checksum or CRC?
+    ver: int = field(init=False, default=3, repr=False)
+    rest: Optional[bytes] = field(init=False, default=None, repr=False)
+    def __str__(self):
+        return super().__str__() + f', voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b}'
