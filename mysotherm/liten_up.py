@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 from .util import slurpy
 from . import mysa_stuff
-from .aws import boto3, botocore, Cognito
+from .aws import boto3
 from .mysa_stuff import BASE_URL, MysaReading, MysaReadingV0, MysaReadingV3
+from .auth import authenticate, CONFIG_FILE
 
 from websockets.sync.client import connect
 import mqttpacket.v311 as mqttpacket
@@ -34,8 +35,7 @@ def main(args=None):
         estimated energy usage to the servers. TODO: Figure out how to report
         this to the server in a form it will accept, by estimating from the
         relay on/off signals.''')
-    p.add_argument('-u', '--user', help='Mysa username', required=True)
-    p.add_argument('-p', '--password', help='Mysa password', required=True)
+    p.add_argument('-u', '--user', help=f'Mysa username (default is first one configured in {CONFIG_FILE!r})')
     p.add_argument('-d', '--device', action='append', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
     p.add_argument('-C', '--current', type=float, help="Estimated max current level (in Amperes). Mysa V2 Lite devices don't have current sensors.")
     p.add_argument('-V', '--voltage', default=240, type=int, help="RMS voltage level for the heater circuit (in Volts), typically 240 V (the default) but may be 208 V or 120 V.")
@@ -44,13 +44,10 @@ def main(args=None):
 
     # Authenticate with pycognito
     bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
-    u = Cognito(
-        user_pool_id=mysa_stuff.USER_POOL_ID,
-        client_id=mysa_stuff.CLIENT_ID,
-        username=args.user,
-        session=bsess,
-        pool_jwk=mysa_stuff.JWKS)
-    u.authenticate(password=args.password)
+    try:
+        u = authenticate(args.user, CONFIG_FILE, bsess)
+    except Exception as exc:
+        p.error(exc)
 
     assert u.token_type == 'Bearer'
     sess = requests.Session()
