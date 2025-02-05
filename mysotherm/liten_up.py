@@ -1,5 +1,6 @@
 #!/usr/bin/env
 from argparse import ArgumentParser
+import base64
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 from .util import slurpy
 from . import mysa_stuff
 from .aws import boto3, botocore, Cognito
-from .mysa_stuff import BASE_URL
+from .mysa_stuff import BASE_URL, MysaReading, MysaReadingV0, MysaReadingV3
 
 from websockets.sync.client import connect
 import mqttpacket.v311 as mqttpacket
@@ -37,6 +38,7 @@ def main(args=None):
     p.add_argument('-p', '--password', help='Mysa password', required=True)
     p.add_argument('-d', '--device', action='append', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
     p.add_argument('-C', '--current', type=float, help="Estimated max current level (in Amperes). Mysa V2 Lite devices don't have current sensors.")
+    p.add_argument('-V', '--voltage', default=240, type=int, help="RMS voltage level for the heater circuit (in Volts), typically 240 V (the default) but may be 208 V or 120 V.")
     p.add_argument('-R', '--reset', action='store_true', help='Just reset faked Mysa Lite devices, and exit')
     args = p.parse_args(args)
 
@@ -118,18 +120,23 @@ def main(args=None):
         for ii, did in enumerate(devices, 1):
             ws.send(mqttpacket.subscribe(ii, [
                 mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
-                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01)
+                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
+                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01)
                 ]))
             timeout = time() + 60
             pkt = mqttpacket.parse_one(ws.recv())
             assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
         try:
+            last_sensor_temp = {}
+
             # Do the "magic upgrades"
             for did in devices:
                 r = sess.post(f'{BASE_URL}/devices/{did}', json=
-                    {'Model': 'BB-V1-1', 'MaxCurrent': args.current})
+                    {'Model': 'BB-V1-1', 'MaxCurrent': args.current, 'Current': args.current})  # do I need/want both?
                 r.raise_for_status()
+                # ... and stash the latest SensorTemp
+                last_sensor_temp[did] = sess.get(f'{BASE_URL}/devices/state/{did}').json(object_hook=slurpy).DeviceState.SensorTemp.v
 
             # Await messages and translate as needed
             while True:
@@ -140,9 +147,9 @@ def main(args=None):
                     pkt = None
 
                 if isinstance(pkt, mqttpacket.PublishPacket):
-                    did, direction = pkt.topic.split('/')[-2:]
+                    did, subtopic = pkt.topic.split('/')[-2:]
                     payload = json.loads(pkt.payload, object_hook=slurpy)
-                    if direction == 'in' and payload.get('msg') == 44:
+                    if subtopic == 'in' and payload.get('msg') == 44:
                         # Setpoint message for BB-V2-0 device (we need to change $TYPE from 1 to 5):
                         #
                         # {"Timestamp": $UNIXTIME,
@@ -166,12 +173,86 @@ def main(args=None):
                             payload.time = payload.timestamp = payload.id // 1000
                             opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain, packet_id=pkt.packetid ^ 0x8000,
                                 payload=json.dumps(payload).encode())
-                            logging.debug(f"Translated command packet for BB-V2-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")
+                            logging.debug(f"Translated command packet for BB-V1-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")
 
                             ws.send(opkt)
                             timeout = time() + 60
                         elif body.type == 5:
                             pass             # don't re-echo our own message
+
+                    elif subtopic == 'batch' and payload.get('msg') == 3:
+                        assert payload.ver == '1.0'
+                        assert payload.src == {'ref': did, 'type': 1}
+                        body = payload.body
+                        readings = MysaReading.parse_readings(base64.b64decode(body.readings))
+                        if readings[0].ver == 0:
+                            logging.debug(f'Saw already-translated-to-v0 readings packet')
+                        elif args.current is None:
+                            logging.warning(f'Skipping translation of readings packet because no current level was specified.')
+                        else:
+                            assert readings[0].ver == 3
+                            last_sensor_temp[did] = readings[-1].sensor_t  # stash latest SensorTemp so we can parrot it
+                            newr = b''.join(
+                                bytes(MysaReadingV0(**{
+                                    k: getattr(r, k) for k, v in r.__dataclass_fields__.items()
+                                    if k not in ('voltage', 'current', 'always0', 'ver', 'rest')}))
+                                for r in readings)
+                            body.readings = base64.b64encode(newr).decode()
+                            payload.id += 1
+                            opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
+                                packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
+                                payload=json.dumps(payload).encode())
+                            logging.debug(f"Translated readings packet for BB-V2-0 into BB-V1-0-L: {mqttpacket.parse_one(opkt)}")
+
+                            ws.send(opkt)
+                            timeout = time() + 60
+
+                    elif subtopic == 'out' and payload.get('msg') == 40:
+                        if args.current is None:
+                            logging.warning(f'Skipping translation of device state packet because no current level was specified.')
+
+                        # Device state message from BB-V2-0-L device:
+                        #
+                        # {"body": {"ambTemp": 16.7, "dtyCycle": 1.0, "hum": 48.0, "stpt": 17.8},
+                        #  "id": ${large random number},     # 64-bits long?
+                        #  "msg": 40,
+                        #  "src": {"ref": "$DID", "type": 1},
+                        #  "time": $UNIXTIME,
+                        #  "ver": "1.0"}
+
+                        assert payload.ver == "1.0"
+
+                        # Device state message from BB-V1-1 devices:
+                        #
+                        # {"ComboTemp": 20.93,          # = "SensorTemp" in /devices/state
+                        # "Current": 0.0,               # This is "the current right now" as opposed to "the highest current seen" reported in /devices/state
+                        # "Device": "$DID",
+                        # "Humidity": 48.0,
+                        # "MainTemp": 17.15,            # = "CorrectedTemp" in /devices/state
+                        # "MsgType": 0,
+                        # "SetPoint": 15.5,
+                        # "Stream": 1,
+                        # "ThermistorTemp": 0.0,
+                        # "Timestamp": $UNIXTIME}
+
+                        opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
+                            packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
+                            payload=json.dumps({
+                                "ComboTemp": last_sensor_temp[did],   # whatever we got last
+                                "Current": args.current * payload.body.get('dtyCycle', 1.0),
+                                "Device": did,
+                                "Humidity": payload.body.get('hum', 0.0),
+                                "MainTemp": payload.body.get('ambTemp', 0.0),
+                                "MsgType": 0,
+                                "SetPoint": payload.body.get('stpt', 0.0),
+                                "Stream": 1,
+                                "ThermistorTemp": 0.0,
+                                "Timestamp": payload.time,
+                        }).encode())
+                        logger.debug(f"Translated device state packet from BB-V2-0-L into BB-V1-1: {mqttpacket.parse_one(opkt)}")
+
+                        ws.send(opkt)
+                        timeout = time() + 60
 
                     if pkt.qos > 0:
                         ws.send(p := mqttpacket.puback(pkt.packetid))
