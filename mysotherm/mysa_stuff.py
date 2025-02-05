@@ -101,7 +101,7 @@ class MysaReading:
     on_ms: int              # Unit = 1 ms
     off_ms: int             # Unit = 1 ms
     heatsink_t: float       # Unit = °C
-    unknown1: int           # Unknown 2 bytes: might be flags
+    free_heap: int          # Free heap (what IS this?)
     rssi: int               # Unit = 1 dBm; frequently-but-not-always (???) stuck at 1 for BB-V2-0(-L) devices
     onoroff: int            # Probably boolean, not int
 
@@ -119,11 +119,12 @@ class MysaReading:
             assert readings[offset: offset+2] == b'\xca\xa0' # All should have same prefix
             assert readings[offset+2] == ver                 # ... and same version
             offset += 3
-            sts, sens, amb, setp, hum, duty, onish, offish, heatsink, unknown1, rssi, onoroff = struct.unpack_from('<LhhhbbhhhHbb', readings, offset)
+            sts, sens, amb, setp, hum, duty, onish, offish, heatsink, heap, rssi, onoroff = struct.unpack_from('<LhhhbbhhhHbb', readings, offset)
             offset += 22
+            heap *= 10                                          # On-the-wire unit = 10 (10 what??)
             sens /= 10; amb /= 10; setp /= 10; heatsink /= 10   # On-the-wire unit = 0.1°C
             rssi = -rssi                                        # On-the-wire-unit = -1 dBm
-            args = [sts, sens, amb, setp, hum, duty, onish, offish, heatsink, unknown1, rssi, onoroff]
+            args = [sts, sens, amb, setp, hum, duty, onish, offish, heatsink, heap, rssi, onoroff]
             reading, offset = _known_reading_vers.get(ver, cls)._make_reading(ver, args, readings, offset)
             output.append(reading)
         return output
@@ -141,7 +142,7 @@ class MysaReading:
     def __str__(self):
         return (f'{datetime.fromtimestamp(self.ts)}: sens={self.sensor_t:.1f}°C, amb={self.ambient_t:.1f}°C, setp={self.setpoint_t:.1f}°C, '
                 f'hum={self.humidity}%, dty={self.duty}%, on?={self.on_ms}ms, off?={self.off_ms}ms, heatsink={self.heatsink_t:.1f}°C, '
-                f'unk1?={self.unknown1:04x}, rssi={self.rssi}{"" if self.rssi is None else "dBm"}, onoroff={self.onoroff}'
+                f'freeheap={self.free_heap}, rssi={self.rssi}{"" if self.rssi is None else "dBm"}, onoroff={self.onoroff}'
                 + ('' if self.rest is None else f', rest?={self.rest.hex()}'))
 
     def __bytes__(self):
@@ -149,8 +150,8 @@ class MysaReading:
             int(self.sensor_t * 10), int(self.ambient_t * 10), int(self.setpoint_t * 10),  # On-the-wire unit = 0.1°
             self.humidity, self.duty, self.on_ms, self.off_ms,
             int(self.heatsink_t * 10),  # On-the-wire unit = 0.1°C
-            self.unknown1,
-            -self.rssi,  # On-the-wire unit = -1 dBm
+            self.free_heap // 10,       # On-the-wire unit = 10 (of something)
+            -self.rssi,                 # On-the-wire unit = -1 dBm
             self.onoroff) + self._pack_rest()
 
 
@@ -179,8 +180,8 @@ class MysaReadingV0(MysaReading):
             self.humidity, self.duty,
             self.on_ms // 100, self.off_ms // 100,  # On-the-wire unit = 100 ms
             int(self.heatsink_t * 10),  # On-the-wire unit = 0.1°C
-            self.unknown1,
-            -self.rssi,  # On-the-wire unit = -1 dBm
+            self.free_heap // 10,       # On-the-wire unit = 10 (of something)
+            -self.rssi,                 # On-the-wire unit = -1 dBm
             self.onoroff, self.unknown2)
 
 @dataclass
