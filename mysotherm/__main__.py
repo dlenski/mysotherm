@@ -38,6 +38,7 @@ def main(args=None):
     p.add_argument('-W', '--no-watch', action='store_true', help="Exit after printing status information, don't watch for realtime MQTT messages")
     p.add_argument('--dump-lots', action='store_true', help='Dump JSON from a whole bunch of endpoints.')
     p.add_argument('--dump-token', action='store_true', help='Dump access token and cURL command.')
+    p.add_argument('--check-readings', action='store_true', help='Check details of raw readings against status information.')
     args = p.parse_args(args)
 
     # Authenticate with pycognito
@@ -85,6 +86,10 @@ def main(args=None):
     #   POST /energy/device/{device_id} (-> reading the device energy usage and temp/humidity readings. Same payload.)
     #   GET /devices/state/{device_id}
 
+    if args.device:
+        if (missing := set(args.device) - set(devices)):
+            p.error(f"Device ID(s) {', '.join(missing)} not found in your Mysa account.")
+
     if args.dump_lots:
         print("GET /users | .json() | .User")
         print("============================")
@@ -99,84 +104,7 @@ def main(args=None):
         print("===========================================")
         pprint(firmware)
 
-    if args.device:
-        if (missing := set(args.device) - set(devices)):
-            p.error(f"Device ID(s) {', '.join(missing)} not found in your Mysa account.")
-        devices = {did: devices[did] for did in args.device}
-
-    for did, d in devices.items():
-        assert did == d.Id
-        # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
-        mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
-        print(f'{d.Name} (model {d.Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
-        tz = pytz.timezone(d.TimeZone)
-        if (s := states.get(did)) is None:
-            print('  No state found!')
-        else:
-            assert did == s.pop('Device')
-            mints, maxts = 1<<32, 0
-            width = max(len(k) for k in s)
-            for k, vd in sorted(s.items()):
-                if not isinstance(vd, dict):
-                    vd = slurpy(v=vd, t=None)  # sometimes {"v": value, "t": timestamp}, sometimes bare value?
-                else:
-                    if vd.t > 1000<<30:
-                        vd.t /= 1000   # sometimes ms, sometimes seconds!? that's insane
-                    if vd.t > maxts:
-                        maxts = vd.t
-                    elif vd.t < mints:
-                        mints = vd.t
-
-                if vd.v == -1:
-                    vd.v = None  # missing/invalid values, I think
-
-                if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink'):
-                    if d.Format == 'fahrenheit':
-                        v = f'{32+vd.v*9/5:.1f}°F'
-                    else:
-                        v = f'{vd.v}°C'
-                elif k == 'Timestamp':
-                    # I'm not sure what this timestamp is, exactly
-                    v = datetime.fromtimestamp(vd.v, tz=tz)
-                elif k == 'Current':
-                    if d.Model == 'BB-V2-0-L':
-                        # From an email from Mysa support:
-                        # "the Mysa V2 LITE model you have does not have a current sensor, so if there is an open load issues, it will not display the H2 error."
-                        if vd.v == 0:
-                            v = 'None (DEVICE HAS NO CURRENT SENSOR)'
-                        else:
-                            v = f'{vd.v*1.0:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
-                    else:
-                        v = f'{vd.v*1.0:.2} A (HIGHEST CURRENT SEEN)'
-                elif k == 'Duty':
-                    if d.Model == 'BB-V2-0-L' and vd.v in (0, 1):
-                        v = f'{"On" if vd.v else "Off":4} (DEVICE HAS NO CURRENT SENSOR)'
-                    else:
-                        v = f'{vd.v*100.0:.0f}% (OF HIGHEST CURRENT)'
-                elif k == 'Brightness': v = f'{vd.v}%'
-                elif k == 'Voltage':    v = f'{vd.v} V'
-                elif k == 'Lock':       v = bool(vd.v) if vd.v in (0, 1) else vd.v
-                elif k == 'Rssi':
-                    # Always set for V1 devices, but only rarely (???) for V2 devices;
-                    # does not seem to vary between BB-V2-0-L and BB-V2-0.
-                    v = vd.v and f'{vd.v} dBm'
-                elif k == 'Humidity':
-                    v = f'{vd.v}%'
-                    if d.Model == 'BB-V2-0-L':
-                        # The Mysa Lite does not advertise a humidity sensor, and the app does not *show* a humidity sensor,
-                        # but the device reports a humidity reading which moves up and down when I hold a cup of steaming hot water
-                        # under it. The sensor might be on-chip but uncalibrated and unexposed.
-                        # https://guides.getmysa.com/help/mysa-for-electric-baseboard-heaters-v1-and-v2/t/cl3uk6csw1479029ejm93kn4q631
-                        v += ' (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
-                else:
-                    v = vd.v
-
-                print(f'  {k+":":{width+1}} {v}')
-            else:
-                mints = datetime.fromtimestamp(mints, tz=tz)
-                maxts = datetime.fromtimestamp(maxts, tz=tz)
-                print(f'  Last updates between {mints} - {maxts}')
-
+    print_device_states(devices, states, firmware, args.device)
     if args.no_watch:
         return
 
@@ -211,15 +139,25 @@ def main(args=None):
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
             mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01),
-        ) for did in devices))
+        ) for did in (args.device or devices)))
         ws.send(mqttpacket.subscribe(1, subs))
         assert isinstance((l := mqttpacket.parse_one(ws.recv())), mqttpacket.SubackPacket)
 
         print("Connected to MQTT endpoint and subscribed to device in/out message...")
 
         timeout = time() + 60
+        last_readings_batch = {}
         while True:
             now = time()
+            for did in last_readings_batch:
+                if last_readings_batch[did] and now > last_readings_batch[did] + 60:
+                    print(f'Requerying device state after raw readings received 60+ seconds ago.')
+                    r = sess.get(f'{BASE_URL}/devices/state/{did}')
+                    r.raise_for_status()
+                    states[did] = r.json(object_hook=slurpy).DeviceState
+                    print_device_states(devices, states, firmware, (did,))
+                    last_readings_batch[did] = None
+
             try:
                 msg = mqttpacket.parse_one(ws.recv(timeout - time()))
                 logging.debug(f'Received packet: {msg}')
@@ -314,6 +252,7 @@ def main(args=None):
                                 raw = base64.b64decode(body.pop('readings'))
                                 assert not body
                                 readings = MysaReading.parse_readings(raw)
+                                last_readings_batch[did] = ts
                                 understood = f'Raw readings (v{readings[0].ver}):\n' + ''.join(f'  {r}\n' for r in readings)
                     except Exception:
                         ts = time()
@@ -338,6 +277,82 @@ def main(args=None):
                         timeout = time() + 60
                 else:
                     pprint(msg)
+
+
+def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, specific=None):
+    for did in (specific or devices):
+        d = devices[did]
+        assert did == d.Id
+        # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
+        mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
+        print(f'{d.Name} (model {d.Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+        tz = pytz.timezone(d.TimeZone)
+        if (s := states.get(did)) is None:
+            print('  No state found!')
+        else:
+            assert did == s.pop('Device')
+            mints, maxts = 1<<32, 0
+            width = max(len(k) for k in s)
+            for k, vd in sorted(s.items()):
+                if not isinstance(vd, dict):
+                    vd = slurpy(v=vd, t=None)  # sometimes {"v": value, "t": timestamp}, sometimes bare value?
+                else:
+                    if vd.t > 1000<<30:
+                        vd.t /= 1000   # sometimes ms, sometimes seconds!? that's insane
+                    if vd.t > maxts:
+                        maxts = vd.t
+                    elif vd.t < mints:
+                        mints = vd.t
+
+                if vd.v == -1:
+                    vd.v = None  # missing/invalid values, I think
+
+                if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink'):
+                    if d.Format == 'fahrenheit':
+                        v = f'{32+vd.v*9/5:.1f}°F'
+                    else:
+                        v = f'{vd.v}°C'
+                elif k == 'Timestamp':
+                    # I'm not sure what this timestamp is, exactly
+                    v = datetime.fromtimestamp(vd.v, tz=tz)
+                elif k == 'Current':
+                    if d.Model == 'BB-V2-0-L':
+                        # From an email from Mysa support:
+                        # "the Mysa V2 LITE model you have does not have a current sensor, so if there is an open load issues, it will not display the H2 error."
+                        if vd.v == 0:
+                            v = 'None (DEVICE HAS NO CURRENT SENSOR)'
+                        else:
+                            v = f'{vd.v*1.0:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
+                    else:
+                        v = f'{vd.v*1.0:.2} A (HIGHEST CURRENT SEEN)'
+                elif k == 'Duty':
+                    if d.Model == 'BB-V2-0-L' and vd.v in (0, 1):
+                        v = f'{"On" if vd.v else "Off":4} (DEVICE HAS NO CURRENT SENSOR)'
+                    else:
+                        v = f'{vd.v*100.0:.0f}% (OF HIGHEST CURRENT)'
+                elif k == 'Brightness': v = f'{vd.v}%'
+                elif k == 'Voltage':    v = f'{vd.v} V'
+                elif k == 'Lock':       v = bool(vd.v) if vd.v in (0, 1) else vd.v
+                elif k == 'Rssi':
+                    # Always set for V1 devices, but only rarely (???) for V2 devices;
+                    # does not seem to vary between BB-V2-0-L and BB-V2-0.
+                    v = vd.v and f'{vd.v} dBm'
+                elif k == 'Humidity':
+                    v = f'{vd.v}%'
+                    if d.Model == 'BB-V2-0-L':
+                        # The Mysa Lite does not advertise a humidity sensor, and the app does not *show* a humidity sensor,
+                        # but the device reports a humidity reading which moves up and down when I hold a cup of steaming hot water
+                        # under it. The sensor might be on-chip but uncalibrated and unexposed.
+                        # https://guides.getmysa.com/help/mysa-for-electric-baseboard-heaters-v1-and-v2/t/cl3uk6csw1479029ejm93kn4q631
+                        v += ' (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
+                else:
+                    v = vd.v
+
+                print(f'  {k+":":{width+1}} {v}')
+            else:
+                mints = datetime.fromtimestamp(mints, tz=tz)
+                maxts = datetime.fromtimestamp(maxts, tz=tz)
+                print(f'  Last updates between {mints} - {maxts}')
 
 
 if __name__ == '__main__':
