@@ -96,7 +96,7 @@ def main(args=None):
                 '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
 
     # Connect to MQTT-over-WebSockets endpoint
-    cred = u.get_credentials(identity_pool_id="us-east-1:ebd95d52-9995-45da-b059-56b865a18379")
+    cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
     signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
     urlp = urlparse(signed_mqtt_url)
     cid = str(uuid1)
@@ -139,7 +139,7 @@ def main(args=None):
             while True:
                 try:
                     pkt = mqttpacket.parse_one(ws.recv(timeout - time()))
-                    logging.debug(f'Received packet: {pkt}')
+                    logger.debug(f'Received packet: {pkt}')
                 except TimeoutError:
                     pkt = None
 
@@ -170,7 +170,7 @@ def main(args=None):
                             payload.time = payload.timestamp = payload.id // 1000
                             opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain, packet_id=pkt.packetid ^ 0x8000,
                                 payload=json.dumps(payload).encode())
-                            logging.debug(f"Translated command packet for BB-V1-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")
+                            logger.debug(f"Translated command packet for BB-V1-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")
 
                             ws.send(opkt)
                             timeout = time() + 60
@@ -183,9 +183,9 @@ def main(args=None):
                         body = payload.body
                         readings = MysaReading.parse_readings(base64.b64decode(body.readings))
                         if readings[0].ver == 0:
-                            logging.debug(f'Saw already-translated-to-v0 readings packet')
+                            logger.debug(f'Saw already-translated-to-v0 readings packet')
                         elif args.current is None:
-                            logging.warning(f'Skipping translation of readings packet because no current level was specified.')
+                            logger.warning(f'Skipping translation of readings packet because no current level was specified.')
                         else:
                             assert readings[0].ver == 3
                             last_sensor_temp[did] = readings[-1].sensor_t  # stash latest SensorTemp so we can parrot it
@@ -199,14 +199,14 @@ def main(args=None):
                             opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
                                 packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
                                 payload=json.dumps(payload).encode())
-                            logging.debug(f"Translated readings packet for BB-V2-0 into BB-V1-0-L: {mqttpacket.parse_one(opkt)}")
+                            logger.debug(f"Translated readings packet for BB-V2-0 into BB-V1-0-L: {mqttpacket.parse_one(opkt)}")
 
                             ws.send(opkt)
                             timeout = time() + 60
 
                     elif subtopic == 'out' and payload.get('msg') == 40:
                         if args.current is None:
-                            logging.warning(f'Skipping translation of device state packet because no current level was specified.')
+                            logger.warning(f'Skipping translation of device state packet because no current level was specified.')
 
                         # Device state message from BB-V2-0-L device:
                         #
@@ -253,12 +253,12 @@ def main(args=None):
 
                     if pkt.qos > 0:
                         ws.send(p := mqttpacket.puback(pkt.packetid))
-                        logging.debug(f"Sent PUBACK packet for packet_id={pkt.packetid}")
+                        logger.debug(f"Sent PUBACK packet for packet_id={pkt.packetid}")
                         timeout = time() + 60
 
                 if timeout - time() < 5:
                     ws.send(mqttpacket.pingreq())
-                    logging.debug(f"Sent PINGREQ keepalive packet")
+                    logger.debug(f"Sent PINGREQ keepalive packet")
                     timeout = time() + 60
 
         except KeyboardInterrupt:

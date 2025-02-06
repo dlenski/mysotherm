@@ -107,7 +107,7 @@ def main(args=None):
     print("Connecting to MQTT endpoint to watch real-time messages...")
 
     # Get AWS credentials with cognito-identity
-    cred = u.get_credentials(identity_pool_id="us-east-1:ebd95d52-9995-45da-b059-56b865a18379")
+    cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
 
     # Now we need to use these credentials to do a "SigV4 presigning" of the target URL that
     # will be used for the HTTP->websockets connection: https://a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com/mqtt
@@ -156,11 +156,11 @@ def main(args=None):
 
             try:
                 msg = mqttpacket.parse_one(ws.recv(timeout - time()))
-                logging.debug(f'Received packet: {msg}')
+                logger.debug(f'Received packet: {msg}')
             except TimeoutError:
                 pkt = None
                 ws.send(mqttpacket.pingreq())
-                logging.debug(f"Sent PINGREQ keepalive packet")
+                logger.debug(f"Sent PINGREQ keepalive packet")
                 timeout = now + 60
             else:
                 if isinstance(msg, mqttpacket._packet.PingrespPacket):
