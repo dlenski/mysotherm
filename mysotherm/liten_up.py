@@ -19,7 +19,7 @@ from .aws import boto3
 from .mysa_stuff import BASE_URL, MysaReading, MysaReadingV0, MysaReadingV3
 from .auth import authenticate, CONFIG_FILE
 
-from websockets.sync.client import connect
+import websockets.exceptions, websockets.sync.client
 import mqttpacket.v311 as mqttpacket
 import requests
 
@@ -100,7 +100,7 @@ def main(args=None):
     signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
     urlp = urlparse(signed_mqtt_url)
     cid = str(uuid1)
-    with connect(
+    with websockets.sync.client.connect(
         urlp._replace(scheme='wss').geturl(),
         subprotocols=('mqtt',),
         # Seemingly not necessary for the server, but Mysa official client adds all this:
@@ -108,6 +108,7 @@ def main(args=None):
         additional_headers={'accept-encoding': 'gzip'},
         user_agent_header=sess.headers['user-agent'],
     ) as ws:
+        connected_at = time()
         ws.send(mqttpacket.connect(str(uuid1()), 60))
         timeout = time() + 60
         pkt = mqttpacket.parse_one(ws.recv())
@@ -143,7 +144,9 @@ def main(args=None):
                 except TimeoutError:
                     pkt = None
 
-                if isinstance(pkt, mqttpacket.PublishPacket):
+                if isinstance(pkt, mqttpacket._packet.DisconnectPacket):
+                    logger.warning("Received MQTT disconnect from server")
+                elif isinstance(pkt, mqttpacket.PublishPacket):
                     did, subtopic = pkt.topic.split('/')[-2:]
                     payload = json.loads(pkt.payload, object_hook=slurpy)
                     if subtopic == 'in' and payload.get('msg') == 44:
@@ -256,19 +259,26 @@ def main(args=None):
                         logger.debug(f"Sent PUBACK packet for packet_id={pkt.packetid}")
                         timeout = time() + 60
 
-                if timeout - time() < 5:
+                if time() > timeout:
                     ws.send(mqttpacket.pingreq())
                     logger.debug(f"Sent PINGREQ keepalive packet")
                     timeout = time() + 60
 
+        except websockets.exceptions.ConnectionClosed:
+            print(f"Websockets connection closed after {int(time() - connected_at)}s (rcvd={exc.rcvd}, sent={exc.sent})...")
+
         except KeyboardInterrupt:
-            print("Got interrupt (Ctrl-C)...")
+            print(f"Got interrupt (Ctrl-C) after {int(time() - connected_at)} s...")
 
         finally:
+            if u.id_claims['exp'] < time() + 60:
+                print(f'Renewing auth tokens in order to restore Mysa V2 Lite thermostats...')
+                u.renew_access_token()
+                sess.headers.update(authorization=u.id_token)
             print(f'Restoring Mysa V2 Lite thermostats to normal state...')
             for did in devices:
                 r = sess.post(f'{BASE_URL}/devices/{did}', json={'Model': 'BB-V2-0-L'})
-                r.raise_for_status
+                r.raise_for_status()
                 print(f'Restored Mysa thermostat {did} to model BB-V2-0-L')
 
 if __name__ == '__main__':
