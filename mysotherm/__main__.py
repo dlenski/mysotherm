@@ -69,10 +69,14 @@ def main(args=None):
         print(f"curl -H 'authorization: {u.id_token}' '{BASE_URL}'")
 
     # Fetch a bunch of status info
-    user = sess.get(f'{BASE_URL}/users').json(object_hook=slurpy).User
-    devices = sess.get(f'{BASE_URL}/devices').json(object_hook=slurpy).DevicesObj
-    states = sess.get(f'{BASE_URL}/devices/state').json(object_hook=slurpy).DeviceStatesObj
-    firmware = sess.get(f'{BASE_URL}/devices/firmware').json(object_hook=slurpy).Firmware
+    try:
+        user = (r := sess.get(f'{BASE_URL}/users')).json(object_hook=slurpy).User
+        devices = (r := sess.get(f'{BASE_URL}/devices')).json(object_hook=slurpy).DevicesObj
+        states = (r := sess.get(f'{BASE_URL}/devices/state')).json(object_hook=slurpy).DeviceStatesObj
+        firmware = (r := sess.get(f'{BASE_URL}/devices/firmware')).json(object_hook=slurpy).Firmware
+    except Exception:
+        assert not r.ok
+        p.error(f"Request for {r.url} failed: {r.status_code} {r.reason}")
     # Have also seen:
     #   GET /devices/capabilities (empty for me)
     #   GET /devices/drstate (empty for me)
@@ -148,10 +152,13 @@ def main(args=None):
             for did in last_readings_batch:
                 if last_readings_batch[did] and now > last_readings_batch[did] + 60:
                     print(f'Requerying device state after raw readings received 60+ seconds ago.')
-                    r = sess.get(f'{BASE_URL}/devices/state/{did}')
-                    r.raise_for_status()
-                    states[did] = r.json(object_hook=slurpy).DeviceState
-                    print_device_states(devices, states, firmware, (did,))
+                    try:
+                        states[did] = (r := sess.get(f'{BASE_URL}/devices/state/{did}')).json(object_hook=slurpy).DeviceState
+                    except Exception:
+                        assert not r.ok
+                        logger.error(f"Request for device state failed: {r.status_code} {r.reason}")
+                    else:
+                        print_device_states(devices, states, firmware, (did,))
                     last_readings_batch[did] = None
 
             try:
