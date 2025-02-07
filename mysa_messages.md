@@ -4,6 +4,8 @@
 - MQTT topics are `/v1/dev/$DID/{out,in}`
 - `UNIXTIME` is in seconds, `UNIXTIMEMS` is in milliseconds
 - `USER_UUID` is the UUID associated with a user account (seen in `/users` response
+- `HOME_UUID` is the UUID associated with a home (seen in `/homes` response
+- `MODEL` is `BB-V1-1` (Mysa V1 Baseboard), `BB-V2-0-L` (Mysa V2 Lite), `BB-V2-0` (Mysa V2 Baseboard), etc.
 
 ## Solicit thermostat state information
 
@@ -63,7 +65,7 @@ sensor temperature does appear in the `/devices/state` output; where does it com
 **Gripe**: The `Duty` value in `/devices/state` is very laggy compared to the `dtyCycle`
 seen here.
 
-## "Check your settings"
+## Check your settings"
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1. Appears to indicate to the thermostat
 that it should check its "non-realtime" settings via the `/devices/state` API:
@@ -246,5 +248,62 @@ the first byte of each reading identifies its variant:
 - Mysa V1 Floor devices (INF-V1-0) send v1 readings.
 - Mysa V2 Baseboard devices (BB-V2-0 and BB-V2-0-L "Lite") send v3 readings.
 
-See the `parse_readings` function for the gory details of what we know so
-far.
+See the `parse_readings` function for the gory details of what is understood
+so far, which is basically everything except for the final byte (which might
+be some kind of checksum or CRC).
+
+## Account management
+
+All JSONful endpoints are on `https://app-prod.mysa.cloud`.
+
+### Add new device to account
+
+POST to `/devices` with body like:
+
+```json
+{
+    "Id": "$DID",
+    "TimeZone": "America/Chihuahua",
+    "Name": "$NAME",
+    "LastPaired": $UNIXTIME,
+    "Home": "$HOME_UUID",
+    "Model": "$MODEL",
+    "schedGlobalOffset": 0
+}
+```
+
+### Check updates
+
+GET `/devices/update_available/$DID` resulting in a response like:
+
+```json
+{
+    "update": false,
+    "installedVersion": "3.16.2.3",
+    "allowedVersion": "3.16.2.3"
+}
+```
+
+### Share device with another account
+
+POST to `/users/$OTHER_USER_ID/updateUserDeviceAccess` with a body like:
+
+```json
+{
+    "DeviceToRevoke": [
+        "$DID"
+    ],
+    "DeviceToGrantAccess": [
+        "$DID",
+        "$DID",
+        "$DID"
+    ],
+    "Home": "$HOME_UUID"
+}
+```
+
+# Thermostats connect to...
+
+- Same MQTT host on port 8883
+- india.colorado.edu NTP
+- devices10010.getmysa.com (sometimes?)
