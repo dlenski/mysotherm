@@ -135,13 +135,17 @@ def main(args=None):
         ws.send(mqttpacket.connect(str(uuid1()), 60))
         assert isinstance(mqttpacket.parse_one(ws.recv()), mqttpacket.ConnackPacket)
 
-        subs = list(chain.from_iterable((
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
-            mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01),
-        ) for did in (args.device or devices)))
-        ws.send(mqttpacket.subscribe(1, subs))
-        assert isinstance((l := mqttpacket.parse_one(ws.recv())), mqttpacket.SubackPacket)
+        for ii, did in enumerate((args.device or devices), 1):
+            # AWS IoT core seems to barf if we subscribe to too many topics at once
+            # (where "too many" is something like 10!!), so instead we iterate over them
+            ws.send(mqttpacket.subscribe(ii, [
+                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
+                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
+                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01)
+                ]))
+            timeout = time() + 60
+            pkt = mqttpacket.parse_one(ws.recv())
+            assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
         print("Connected to MQTT endpoint and subscribed to device in/out message...")
 
