@@ -49,13 +49,8 @@ def main(args=None):
 
     assert u.token_type == 'Bearer'
     sess = requests.Session()
-    sess.headers.update(
-        # It's a JWT, a bearer token, which means we *should* prefix it with "Bearer" in the
-        # authorization header, but Mysa servers don't seem to accept it with the
-        # "Bearer" prefix (although they seemingly used to: https://github.com/drinkwater99/MySa/blob/master/Program.cs#L35)
-        authorization=u.id_token,
-        **mysa_stuff.CLIENT_HEADERS
-    )
+    sess.auth = mysa_stuff.auther(u)
+    sess.headers.update(mysa_stuff.CLIENT_HEADERS)
 
     if args.dump_token:
         print("Cognito ID token:")

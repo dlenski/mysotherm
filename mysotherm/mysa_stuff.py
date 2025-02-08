@@ -1,7 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
+from time import time
 import struct
+
+import botocore
+import requests
 
 from .aws import botocore
 
@@ -44,6 +48,19 @@ CLIENT_HEADERS = {
 
 BASE_URL = 'https://app-prod.mysa.cloud'
 """Base URL for Mysa's JSONful API"""
+
+
+def auther(u):
+    def f(request: requests.Request) -> requests.Request:
+        if time() > u.id_claims['exp'] - 5:
+            u.renew_access_token()  # despite the name, this also renews the id_token
+
+        # It's a JWT, a bearer token, which means we *should* prefix it with "Bearer" in the
+        # authorization header, but Mysa servers don't seem to accept it with the
+        # "Bearer" prefix (although they seemingly used to: https://github.com/drinkwater99/MySa/blob/master/Program.cs#L35)
+        request.headers['authorization'] = u.id_token
+        return request
+    return f
 
 
 def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials):

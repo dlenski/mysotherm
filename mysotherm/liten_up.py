@@ -51,10 +51,8 @@ def main(args=None):
 
     assert u.token_type == 'Bearer'
     sess = requests.Session()
-    sess.headers.update(
-        authorization=u.id_token,
-        **mysa_stuff.CLIENT_HEADERS
-    )
+    sess.auth = mysa_stuff.auther(u)
+    sess.headers.update(mysa_stuff.CLIENT_HEADERS)
 
     # This endpoint has the "real" device models, even after faking them in /devices
     r = sess.get(f'{BASE_URL}/users')
@@ -264,17 +262,13 @@ def main(args=None):
                     logger.debug(f"Sent PINGREQ keepalive packet")
                     timeout = time() + 60
 
-        except websockets.exceptions.ConnectionClosed:
+        except websockets.exceptions.ConnectionClosed as exc:
             print(f"Websockets connection closed after {int(time() - connected_at)}s (rcvd={exc.rcvd}, sent={exc.sent})...")
 
         except KeyboardInterrupt:
             print(f"Got interrupt (Ctrl-C) after {int(time() - connected_at)} s...")
 
         finally:
-            if u.id_claims['exp'] < time() + 60:
-                print(f'Renewing auth tokens in order to restore Mysa V2 Lite thermostats...')
-                u.renew_access_token()
-                sess.headers.update(authorization=u.id_token)
             print(f'Restoring Mysa V2 Lite thermostats to normal state...')
             for did in devices:
                 r = sess.post(f'{BASE_URL}/devices/{did}', json={'Model': 'BB-V2-0-L'})
