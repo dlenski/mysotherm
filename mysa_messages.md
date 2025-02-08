@@ -126,9 +126,10 @@ after the setpoint has changed?
  "Timestamp": $UNIXTIME}
  ```
 
-## Firmware report?
+## Generic device log message
 
-Sent by devices to `/v1/dev/$DID/out` with QOS=0. Unsure what triggers it:
+Sent by devices to `/v1/dev/$DID/out` with QOS=0. Unsure what triggers it, but happens at boot and sometimes to
+report local IP, serial number (!= device ID, otherwise hidden???), and firmware version:
 
 ```json
  {"Device": "$DID",

@@ -212,6 +212,8 @@ def main(args=None):
                                 understood = f'Device (V1?) reporting its status: {json.dumps(j)}'
                             elif mt == 1 and subtopic == 'out':
                                 understood = f'Unclear prev/next message from device: {json.dumps(j)}'
+                            elif mt == 10 and subtopic == 'out':
+                                understood = f'Post-boot message: {json.dumps(j)}'
                         elif (mt := j.pop('msg')) is not None:
                             if mt == 40:
                                 assert j.pop('ver') == '1.0'
