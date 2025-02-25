@@ -57,7 +57,7 @@ def load_credentials(
         section = next((s for s in config.sections() if s.startswith('mysa:')), None)
         if section is None:
             raise NotImplementedError(f'Did not find any section named "mysa:USERNAME" in config file {cf!r}')
-        user = section.removeprefix('mysa:')
+        user = section[5:] #.removeprefix('mysa:')
         logger.debug(f'Using credentials from section {section!r} of config file {cf!r}')
     else:
         section = f'mysa:{user}'

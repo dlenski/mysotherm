@@ -51,7 +51,8 @@ class Cognito(pycognito.Cognito):
 
         # https://boto3.amazonaws.com/v1/documentation/api/1.26.93/reference/services/cognito-identity/client/get_id.html
         # "cognito-idp.<region>.amazonaws.com/<YOUR_USER_POOL_ID>"
-        logins = {str.removeprefix(self.id_claims['iss'], 'https://'): self.id_token}
+        assert self.id_claims['iss'].startswith('https://')
+        logins = {self.id_claims['iss'][8:]: self.id_token}
 
         if not identity_id:
             r = client.get_id(IdentityPoolId=identity_pool_id, Logins=logins)
