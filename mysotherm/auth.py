@@ -21,7 +21,6 @@ def authenticate(
     bsess: Optional[boto3.session.Session] = None,
     writeback: bool = True,
 ):
-    cf = os.path.expanduser(cf)
     try:
         return load_credentials(user, cf, bsess, writeback)
     except NotImplementedError:
@@ -48,6 +47,7 @@ def load_credentials(
     writeback: bool = True
 ):
     config = configparser.ConfigParser()
+    cf = os.path.expanduser(cf)
     try:
         config.read(cf)
     except configparser.Error as exc:
@@ -107,6 +107,7 @@ def login(user: str, password: str, bsess: Optional[boto3.session.Session] = Non
 
 def write_credentials(cf: str, u: Cognito):
     config = configparser.ConfigParser()
+    cf = os.path.expanduser(cf)
     user = u.id_claims["cognito:username"]
     try:
         config.read(cf)
