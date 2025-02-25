@@ -21,7 +21,7 @@ import mqttpacket.v311 as mqttpacket
 from .util import slurpy
 from . import mysa_stuff
 from .mysa_stuff import BASE_URL, MysaReading
-from .aws import boto3
+from .aws import boto3, botocore
 from .auth import authenticate, CONFIG_FILE
 
 
@@ -81,6 +81,24 @@ def main(args=None):
     #   POST /energy/device/{device_id} (-> reading the device energy usage and temp/humidity readings. Same payload.)
     #   GET /devices/state/{device_id}
 
+    # Get AWS credentials with cognito-identity. These are needed both for
+    # the boto3 'iot' client object, as well as for MQTT.
+    cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
+
+    # 1. Why does Mysa store the serial number in a whole separate API?
+    # 2. Below is the least-repetitive, sanest way to stuff arbitrary `botocore.credentials.Credentials`
+    #    into the boto3 session object. Naturally, it's undocumented in
+    #    https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html
+    bsess._session._credentials = cred
+    iotc = bsess.client('iot')
+    for d in devices:
+        try:
+            ser = iotc.describe_thing(thingName=d)['attributes']['Serial']
+        except (botocore.exceptions.ClientError, KeyError):
+            logger.warn('Could not get serial number for device ID {d}')
+            ser = None
+        devices[d]._serial = ser
+
     if args.device:
         if (missing := set(args.device) - set(devices)):
             p.error(f"Device ID(s) {', '.join(missing)} not found in your Mysa account.")
@@ -104,9 +122,6 @@ def main(args=None):
         return
 
     print("Connecting to MQTT endpoint to watch real-time messages...")
-
-    # Get AWS credentials with cognito-identity
-    cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
 
     # Now we need to use these credentials to do a "SigV4 presigning" of the target URL that
     # will be used for the HTTP->websockets connection: https://a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com/mqtt
@@ -289,7 +304,7 @@ def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, speci
         assert did == d.Id
         # Device ID is its WiFi MAC addresses. To get its Bluetooth MAC address, add 2 to the last byte
         mac = ':'.join(did[n:n+2].upper() for n in range(0, len(did), 2))
-        print(f'{d.Name} (model {d.Model!r}, mac {mac}, firmware {firmware[did].InstalledVersion}):')
+        print(f'{d.Name} (model {d.Model!r}, mac {mac}, serial {d._serial}, firmware {firmware[did].InstalledVersion}):')
         tz = pytz.timezone(d.TimeZone)
         if (s := states.get(did)) is None:
             print('  No state found!')
