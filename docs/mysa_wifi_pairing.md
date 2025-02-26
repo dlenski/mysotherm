@@ -50,22 +50,32 @@ $ curl -s 'http://192.168.4.1:57961/network/' \
 
 ## Mysterious certificates endpoint
 
-This _only exists_ in newer versions of the firmware (3.16.2.3 yes; 3.13.1.25 no).
+This _only exists_ in newer versions of the firmware (`GET /certificates` added in 3.16.0.4; `PUT /certificates/{0,1}` added in 3.16.0.6).
 
 `GET /certificates` ->
 ```json
 {"certificates": ["1d978c9bdd1b95b46bc007e7779d2bb1d655af49d18afb4e0d8a7ee68244a1a2", "cbeea2a34b6c7b2c7df9ae0f99d7b5cf580f50bb49352614a46fd816461a30a5"]}
 ```
 
-These are sha256 digests, and seem to be the same across all devices on firmware 3.16.2.3,
-but I can't find any publicly-known or Mysa-specific certs with these as their certificate
-or SubjectPublicKeyInfo fingerprints.
+These are sha256 digests, and are the same across all devices on firmware 3.16.2.3.
+They are *not* the sha256 digests of the DER-encoded/binary form of the certs, but
+rather they are the sha256 digests of the certs encoded as **PEM** (with 64 base64 chars/line, `\n` as
+EOL delimiter, _no final newline_, standard `-----BEGIN CERTIFICATE-----` and `-----END CERTIFICATE-----`
+as first and last lines):
+
+1. https://crt.sh/?sha256=1465fa205397b876faa6f0a9958e5590e40fcc7faa4fb7c2c8677521fb5fb658 (Starfield Class 2 CA root)
+  - This is the root cert that signs TLS on `a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com` (ports 8883 and 443),
+    as well as `devices10010.getmysa.com:443`
+2. https://crt.sh/?sha256=4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161 (DigiCert Global Root CA)
+  - This is the root cert that signs TLS on `devices10010b.mysa.cloud:443`
+
+You can check these with `curl 'https://crt.sh/?d=$SHA256' | perl -pe 'chop if /END CERTIFICATE/' | sha256sum`.
 
 There are two "slots" to upload new certs (0 and 1), with `PUT /certificates/{0,1}`. After
 uploading a new cert in DER form, its hash is reflected in the `GET /certificates` output:
 
 ```sh
-$ openssl x509 -outform DER < some_cert.pem | curl -v -X PUT 'http://192.168.4.1:57961/certificates/1' -H 'Content-Type: ' -H 'Expect: ' --data-binary @/dev/stdin
+$ openssl x509 -outform DER < some_cert.pem | curl -v -X PUT 'http://192.168.4.1:57961/certificates/1' -H 'Expect: ' --data-binary @/dev/stdin
 {"status": "ok"}
 $ curl http://192.168.4.1:57961/certificates
 {"certificates": ["1d978c9bdd1b95b46bc007e7779d2bb1d655af49d18afb4e0d8a7ee68244a1a2", "deadbeefcafef00fdeadbeefcafef00fdeadbeefcafef00fdeadbeefcafef00f"]}
