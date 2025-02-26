@@ -59,10 +59,18 @@ class Cognito(pycognito.Cognito):
             identity_id = r['IdentityId']
         r = client.get_credentials_for_identity(IdentityId=identity_id, Logins=logins)
         c = r['Credentials']
+
+        def _refresh_credentials():
+            try:
+                self.verify_token(self.id_token, "id_token", "id")
+            except pycognito.TokenVerificationException:
+                self.renew_access_token()  # despite the name, this also renews the id_token
+            return self.get_credentials(identity_id=identity_id, region=region)
+
         return botocore.credentials.RefreshableCredentials(
             c['AccessKeyId'],
             c['SecretKey'],
             c['SessionToken'],
             c['Expiration'],
             method='cognito-idp',
-            refresh_using=lambda: self.get_credentials(identity_id=identity_id, region=region))
+            refresh_using=_refresh_credentials)
