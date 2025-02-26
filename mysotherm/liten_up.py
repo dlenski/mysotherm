@@ -58,15 +58,18 @@ def main(args=None):
     r = sess.get(f'{BASE_URL}/users')
     r.raise_for_status()
     user = r.json(object_hook=slurpy).User
-    real_models = {k: v.deviceType for k, v in user.DevicesPaired.State.BB.items()}
+    r = sess.get(f'{BASE_URL}/devices')
+    devices = r.json(object_hook=slurpy).DevicesObj
+    real_models = {k: v.deviceType for k, v in user.DevicesPaired.State.BB.items() if k in devices}
 
     # Find applicable device(s)
     if args.device:
-        if args.device not in real_models:
-            p.error(f'Mysa thermostat with ID (MAC address) of {args.device} not found in your account.')
-        elif (m := real_models[args.device]) != 'BB-V2-0-L':
-            p.error(f'Your Mysa thermostat {args.device} is model {m}, not BB-V2-0-L (Mysa V2 Lite). This trick is not applicable to it.')
-        devices = (args.device,)
+        for did in args.device:
+            if did not in real_models:
+                p.error(f'Mysa thermostat with ID (MAC address) of {args.device} not found in your account.')
+            elif (m := real_models[args.device]) != 'BB-V2-0-L':
+                p.error(f'Your Mysa thermostat {args.device} is model {m}, not BB-V2-0-L (Mysa V2 Lite). This trick is not applicable to it.')
+        devices = args.device
     else:
         devices = [k for k, m in real_models.items() if m == 'BB-V2-0-L']
         if not devices:
@@ -87,10 +90,10 @@ def main(args=None):
     firmware = {k: v.InstalledVersion for k, v in r.json(object_hook=slurpy).Firmware.items()}
     for did in devices:
         if (v := firmware.get(did)) is None:
-            print(f'WARNING: Your Mysa thermostat {args.device} has an unknown firmware version. This might not work.\n'
+            print(f'WARNING: Your Mysa thermostat {did} has an unknown firmware version. This might not work.\n'
                 '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
         elif not (3, 16, 2, 3) <= tuple(int(x) for x in v.split('.')) <= (3, 16, 2, 3):
-            print(f'WARNING: Your Mysa thermostat {args.device} is on firmware version {v}. This has only been tested with v3.16.2.3'
+            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v3.16.2.3'
                 '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
 
     # Connect to MQTT-over-WebSockets endpoint
