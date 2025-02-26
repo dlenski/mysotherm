@@ -1,6 +1,6 @@
 # Mysa MQTT messages
 
-- `DID` is the 12-digit MAC address of the device.
+- `DID` is the 12-digit MAC address of the device; `DID6` are the last 6 digits thereof.
 - MQTT topics are `/v1/dev/$DID/{out,in}`
 - `UNIXTIME` is in seconds, `UNIXTIMEMS` is in milliseconds
 - `USER_UUID` is the UUID associated with a user account (seen in `/users` response
