@@ -92,8 +92,8 @@ def main(args=None):
         if (v := firmware.get(did)) is None:
             print(f'WARNING: Your Mysa thermostat {did} has an unknown firmware version. This might not work.\n'
                 '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
-        elif not (3, 16, 2, 3) <= tuple(int(x) for x in v.split('.')) <= (3, 16, 2, 3):
-            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v3.16.2.3'
+        elif not (3, 13, 1, 25) <= tuple(int(x) for x in v.split('.')) <= (3, 16, 2, 3):
+            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v3.13.1.25-v3.16.2.3'
                 '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
 
     # Connect to MQTT-over-WebSockets endpoint
