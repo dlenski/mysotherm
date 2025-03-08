@@ -38,6 +38,8 @@ def authenticate(
                     print('Username does not exist')
                 elif code == 'NotAuthorizedException':
                     print('Incorrect username or password')
+                else:
+                    raise
 
 
 def load_credentials(
@@ -78,10 +80,18 @@ def load_credentials(
     try:
         u.verify_token(u.id_token, "id_token", "id")
     except pycognito.TokenVerificationException:
-        u.renew_access_token()  # despite the name, this also renews the id_token
-        logger.debug(f'Successfully refreshed id_token for user {user!r}')
-        if writeback:
-            write_credentials(cf, u)
+        try:
+            u.renew_access_token()  # despite the name, this also renews the id_token
+        except ClientError as exc:
+            code = exc.response['Error']['Code']
+            if code == 'NotAuthorizedException':
+                raise NotImplementedError('New login needed because refresh_token has expired.')
+            else:
+                raise
+        else:
+            logger.debug(f'Successfully refreshed id_token for user {user!r}')
+            if writeback:
+                write_credentials(cf, u)
     else:
         # FIXME: What if it has been revoked prematurely. How can we check?
         logger.debug(f'Using unexpired id_token for user {user!r}')
