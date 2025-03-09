@@ -65,7 +65,7 @@ sensor temperature does appear in the `/devices/state` output; where does it com
 **Gripe**: The `Duty` value in `/devices/state` is very laggy compared to the `dtyCycle`
 seen here.
 
-## Check your settings"
+## Check your settings
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1. Appears to indicate to the thermostat
 that it should check its "non-realtime" settings via the `/devices/state` API:
@@ -89,6 +89,17 @@ curl /devices/$DID -d '{"Format": "{celsius,fahrenheit}"}'
 curl /devices/$DID -d '{"ecoMode": "{0,1}"}'   # Weirdly, 0 is on, 1 is off
 curl /devices/$DID -d '{"Name": "$WHATEVER"}'
 curl /devices/$DID -d '{"TimeZone": "$WHATEVER"}'
+```
+
+## Dump your readings
+
+Appears to indicate to the thermostat that it should immediately dump its readings in the binary format
+(see [below](#readings-from-device)):
+
+```json
+{"Device": "$DID",
+ "Timestamp": $UNIXTIME,
+ "MsgType": 7}
 ```
 
 ### Magic upgrade
@@ -125,6 +136,38 @@ after the setpoint has changed?
  "Source": 3,
  "Timestamp": $UNIXTIME}
  ```
+
+Sent by cloud/server (maybe?) to `/v1/dev/$DID/in`, unclear when/why… maybe when device appears to have lost connectivity?
+
+ ```json
+{"Device": "$DID",
+ "MsgType": 20,
+ "Timestamp": 1234}   #<-- Relatively low value
+ ```
+
+## "Killer ping""
+
+Sending this to `/v1/dev/$DID/in` leads to a reply, and then the device restarts in pairing mode (!!) about 30 seconds later:
+
+```json
+{"Device": "$DID",
+ "Timestamp": $UNIXTIME,
+ "MsgType": 40, "EchoID": $X}
+```
+
+The reply:
+
+```json
+{"Device": "$DID",
+ "Timestamp": $UNIXTIME,
+ "MsgType": 5,
+ "EchoID": 1}
+```
+
+Other *small* values of EchoID give similar results:
+
+* 0, 1 -> restarting in pairing mode without error status
+* 2 or 3 -> restarting in pairing mode *and* show [H2 error](https://help.getmysa.com/en-US/error-code-h2-257246)
 
 ## Generic device log message
 
@@ -163,7 +206,7 @@ Thermostat responds on `/v1/dev/$DID/out` with QOS=0:
 ```json
 {"body": {"state": {"br": 50, "ho": 1, "lk": 0, "md": 3, "sp": 17.0},
           "success": 1,
-          "trig_src": 3,
+          "trig_src": 3,   # response to 3=app command, 1=button command
           "type": 5},
  "id": ${large random number},     # 64-bits long?
  "msg": 44,
@@ -283,6 +326,22 @@ GET `/devices/update_available/$DID` resulting in a response like:
     "installedVersion": "3.16.2.3",
     "allowedVersion": "3.16.2.3"
 }
+```
+
+or
+
+```json
+{
+    "update": true,
+    "installedVersion": "3.13.1.25",
+    "allowedVersion": "3.16.2.3"
+}
+```
+
+or, if the devices has never `POST`ed its firmware version to the appropriate endpoint, then after a few seconds' delay status 500 and:
+
+```json
+"Check update failed for $DID. Unable to determine neither installed version nor allowed version"
 ```
 
 ### Share device with another account

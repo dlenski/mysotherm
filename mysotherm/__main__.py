@@ -39,6 +39,7 @@ def main(args=None):
     p.add_argument('--dump-lots', action='store_true', help='Dump JSON from a whole bunch of endpoints.')
     p.add_argument('--dump-token', action='store_true', help='Dump access token and cURL command.')
     p.add_argument('--check-readings', action='store_true', help='Check details of raw readings against status information.')
+    p.add_argument('--inject', default=[], action='append', help='After connecting to MQTT endpoint, send this publish packet (format is topic=JSON, and may be specified multiple times)')
     args = p.parse_args(args)
 
     bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
@@ -157,7 +158,14 @@ def main(args=None):
             pkt = mqttpacket.parse_one(ws.recv())
             assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
-        print("Connected to MQTT endpoint and subscribed to device in/out message...")
+        print("Connected to MQTT endpoint and subscribed to device in/out/batch topics...")
+
+        for ii, ij in enumerate(args.inject):
+            topic, j = ij.split('=', 1)
+            ws.send(mqttpacket.publish(topic, False, 1, False, packet_id=ii ^ 0x9000, payload=j.encode()))
+            pkt = mqttpacket.parse_one(ws.recv())
+            assert isinstance(pkt, mqttpacket.PubackPacket) and pkt.packet_id == ii ^ 0x9000
+            print(f'Injected MQTT message to {topic!r}, with QOS=1 and contents {j!r}')
 
         timeout = time() + 60
         last_readings_batch = {}
@@ -205,16 +213,26 @@ def main(args=None):
 
                     understood = ts = orig_json = None
 
+                    # Yes, the payload can contain newlines, which technically make it invalid JSON
+                    _payload = msg.payload.replace(b'\n', b'\\n')
+
                     try:
-                        j = json.loads(msg.payload, object_hook=slurpy)
+                        j = json.loads(_payload, object_hook=slurpy)
                         orig_json = deepcopy(j)
                         if (mt := j.pop('MsgType', None)) is not None:
-                            assert j.pop('Device') == did
-                            ts = j.pop('Timestamp')
+                            if 'device' in j and 'timestamp' in j:
+                                # newer firmware (?) sends lowercase version for some messages
+                                assert j.pop('device') == did
+                                ts = j.pop('timestamp')
+                            else:
+                                assert j.pop('Device') == did
+                                ts = j.pop('Timestamp')
                             if mt == 11 and subtopic == 'in':
                                 understood = f'App telling device to publish its status ({json.dumps(j)})'
                             elif mt == 6 and subtopic == 'in':
                                 understood = f'App telling device to check its settings ({json.dumps(j)})'
+                            elif mt == 7 and subtopic == 'in':
+                                understood = f'App telling device to dump its readings ({json.dumps(j)})'
                             elif mt == 4 and subtopic == 'out':
                                 understood = f'Device log [{j.Level}] {j.Message}'
                             elif mt == 0 and subtopic == 'out':
@@ -224,6 +242,8 @@ def main(args=None):
                                 understood = f'Unclear prev/next message from device: {json.dumps(j)}'
                             elif mt == 10 and subtopic == 'out':
                                 understood = f'Post-boot message: {json.dumps(j)}'
+                            elif mt == 20 and subtopic == 'in':
+                                understood = f'Unknown MsgType=20, might be "check your status" similar to MsgType=6 ({json.dumps(j)})'
                         elif (mt := j.pop('msg')) is not None:
                             if mt in (40, 17) and subtopic == 'out':
                                 assert j.pop('ver') == '1.0'
@@ -268,7 +288,23 @@ def main(args=None):
                                 assert set(j.keys()) == {'body'}
                                 body = j.body
                                 assert body.pop('success') == 1
-                                understood = f'Device responding to app command: {json.dumps(body)} (id={id_})'
+                                if body.get('trig_src') == 3:
+                                    cmd_src = 'app command'
+                                elif body.get('trig_src') == 1:
+                                    cmd_src = 'buttons'
+                                else:
+                                    cmd_src = 'command of unknown trig_src'
+                                understood = f'Device responding to {cmd_src}: {json.dumps(body)} (id={id_})'
+                            elif mt == 61 and subtopic == 'out':
+                                assert j.pop('time') == 0
+                                assert j.pop('ver') == '1.0'
+                                assert j.pop('src') == {'ref': did, 'type': 1}
+                                id_ = j.pop('id')
+                                body = j.pop('body')
+                                assert not j
+                                fw = body.pop('fw')
+                                assert not body
+                                understood = f'Device boot-up message with firmware version {fw}'
                             elif mt == 3 and subtopic == 'batch':
                                 ts = j.pop('time')
                                 assert j.pop('ver') == '1.0'
@@ -281,7 +317,8 @@ def main(args=None):
                                 readings = MysaReading.parse_readings(raw)
                                 last_readings_batch[did] = ts
                                 understood = f'Raw readings (v{readings[0].ver}):\n' + ''.join(f'  {r}\n' for r in readings)
-                    except Exception:
+                    except Exception as exc:
+                        print(f"Exception while parsing message payload: {exc}")
                         ts = time()
 
                     if understood and ts:
