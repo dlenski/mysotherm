@@ -14,17 +14,15 @@ stuff that I know nothing about and have never used.
 
 My concerns:
 
-- The app claims to have
-  ["No fees (for real). All the features."](https://getmysa.com/pages/app-ca#:~:text=Free%20app.%20No%20fees%20(for%20real).%0AAll%20the%20features.)
-  but if you have their more inexpensive Mysa Lite device then you don't get in-app charting of temperature and energy usage
-  or multi-thermostat zone control, despite the fact that those appear to be _entirely software-based_ features.
 - The devices appear to be entirely "cloud-dependent": communication with the thermostats goes through
   AWS cloud services and there is no known
   [local network API](https://www.reddit.com/r/smarthome/comments/18z22f0/mysa_thermostat_lan_api/)
-- The first one I bought was a Mysa Lite which had [a stuck-open
-  relay](https://electronics.stackexchange.com/questions/736103/cleaning-a-stuck-open-relay-thats-mounted-on-a-pcb) (yes, really) and I was tearing
-  my hair out trying to figure out what was wrong with it.
-- And most importantly, I want to know how they work 🕵🏻‍♂️
+- As Mysa puts it,
+  ["No fees (for real). All the features."](https://getmysa.com/pages/app-ca#:~:text=Free%20app.%20No%20fees%20(for%20real).%0AAll%20the%20features.)
+  However, if you have their more inexpensive Mysa Lite device then you don't get in-app charting of temperature
+  or multi-thermostat zone control. Those appear to be entirely software-based features, and I wonder if I
+  can re-enable them.
+- And most importantly, I just wanted to know how they work 🕵🏻‍♂️
 
 # Prior work
 
