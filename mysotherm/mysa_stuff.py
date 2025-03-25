@@ -124,6 +124,7 @@ class MysaReading:
             heap *= 10                                          # On-the-wire unit = 10 (10 what??)
             sens /= 10; amb /= 10; setp /= 10; heatsink /= 10   # On-the-wire unit = 0.1°C
             rssi = -rssi                                        # On-the-wire-unit = -1 dBm
+            onish *= 100; offish *= 100                         # On-the-wire-unit = 100 ms
             args = [sts, sens, amb, setp, hum, duty, onish, offish, heatsink, heap, rssi, onoroff]
             reading, offset = _known_reading_vers.get(ver, cls)._make_reading(ver, args, readings, offset)
             output.append(reading)
@@ -148,10 +149,11 @@ class MysaReading:
     def __bytes__(self):
         return b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbb', self.ver, self.ts,
             int(self.sensor_t * 10), int(self.ambient_t * 10), int(self.setpoint_t * 10),  # On-the-wire unit = 0.1°
-            self.humidity, self.duty, self.on_ms, self.off_ms,
-            int(self.heatsink_t * 10),  # On-the-wire unit = 0.1°C
-            self.free_heap // 10,       # On-the-wire unit = 10 (of something)
-            -self.rssi,                 # On-the-wire unit = -1 dBm
+            self.humidity, self.duty,
+            self.on_ms // 100, self.off_ms // 100,  # On-the-wire-unit = 100 ms
+            int(self.heatsink_t * 10),              # On-the-wire unit = 0.1°C
+            self.free_heap // 10,                   # On-the-wire unit = 10 (of something)
+            -self.rssi,                             # On-the-wire unit = -1 dBm
             self.onoroff) + self._pack_rest()
 
 
@@ -167,37 +169,29 @@ class MysaReadingV0(MysaReading):
 
     @classmethod
     def _make_reading(cls, ver, args, readings, offset):
-        args[6] *= 100; args[7] *= 100  # On-the-wire unit = 100 ms
         unknown2, = struct.unpack_from('<B', readings, offset)
         return cls(*args, unknown2=unknown2), offset + 1
+
+    def _pack_rest(self):
+        return struct.pack('<B', self.unknown2)
 
     def __str__(self):
         return super().__str__() + f' | v0: unk2?={self.unknown2:08b}'
 
-    def __bytes__(self):
-        return b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbbB', self.ver, self.ts,
-            int(self.sensor_t * 10), int(self.ambient_t * 10), int(self.setpoint_t * 10),  # On-the-wire unit = 0.1°
-            self.humidity, self.duty,
-            self.on_ms // 100, self.off_ms // 100,  # On-the-wire unit = 100 ms
-            int(self.heatsink_t * 10),  # On-the-wire unit = 0.1°C
-            self.free_heap // 10,       # On-the-wire unit = 10 (of something)
-            -self.rssi,                 # On-the-wire unit = -1 dBm
-            self.onoroff, self.unknown2)
-
 
 @dataclass
-class MysaReadingV1(MysaReadingV0):
+class MysaReadingV1(MysaReading):
     '''Version 1 binary structure representing one raw reading from a Mysa thermostat device.
 
     This version is used by the thermostat with model number INF-V1-0 ("Mysa Floor"),
     and maybe others.'''
+    unknown2: int     # Unknown final byte: might be checksum or CRC?
     voltage: int      # Unit = 1 V
     ver: int = field(init=False, default=1, repr=False)
     rest: Optional[bytes] = field(init=False, default=None, repr=False)
 
     @classmethod
     def _make_reading(cls, ver, args, readings, offset):
-        args[6] *= 100; args[7] *= 100  # On-the-wire unit = 100 ms
         voltage, unknown2 = struct.unpack_from('<hB', readings, offset)
         return cls(*args, voltage=voltage, unknown2=unknown2), offset + 3
 
@@ -205,7 +199,7 @@ class MysaReadingV1(MysaReadingV0):
         return struct.pack('<hB', self.voltage, self.unknown2)
 
     def __str__(self):
-        return super().__str__() + f' | v1: voltage={self.voltage}V'
+        return super().__str__() + f' | v1: voltage={self.voltage}V, unk2?={self.unknown2:08b}'
 
 
 @dataclass
