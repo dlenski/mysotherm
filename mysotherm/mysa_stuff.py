@@ -172,7 +172,7 @@ class MysaReadingV0(MysaReading):
         return cls(*args, unknown2=unknown2), offset + 1
 
     def __str__(self):
-        return super().__str__() + f', unk2?={self.unknown2:08b}'
+        return super().__str__() + f' | v0: unk2?={self.unknown2:08b}'
 
     def __bytes__(self):
         return b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbbB', self.ver, self.ts,
@@ -184,16 +184,40 @@ class MysaReadingV0(MysaReading):
             -self.rssi,                 # On-the-wire unit = -1 dBm
             self.onoroff, self.unknown2)
 
+
+@dataclass
+class MysaReadingV1(MysaReadingV0):
+    '''Version 1 binary structure representing one raw reading from a Mysa thermostat device.
+
+    This version is used by the thermostat with model number INF-V1-0 ("Mysa Floor"),
+    and maybe others.'''
+    voltage: int      # Unit = 1 V
+    ver: int = field(init=False, default=1, repr=False)
+    rest: Optional[bytes] = field(init=False, default=None, repr=False)
+
+    @classmethod
+    def _make_reading(cls, ver, args, readings, offset):
+        args[6] *= 100; args[7] *= 100  # On-the-wire unit = 100 ms
+        voltage, unknown2 = struct.unpack_from('<hB', readings, offset)
+        return cls(*args, voltage=voltage, unknown2=unknown2), offset + 3
+
+    def _pack_rest(self):
+        return struct.pack('<hB', self.voltage, self.unknown2)
+
+    def __str__(self):
+        return super().__str__() + f' | v1: voltage={self.voltage}V'
+
+
 @dataclass
 class MysaReadingV3(MysaReading):
-    '''Version 0 binary structure representing one raw reading from a Mysa thermostat device.
+    '''Version 3 binary structure representing one raw reading from a Mysa thermostat device.
 
     This version is used by the thermostats with model number BB-V2-0 ("Mysa Baseboard V2")
     and BB-V2-0-L ("Mysa V2 Lite"), and maybe others.'''
     voltage: int      # Unit = 1 V
     current: int      # Unit = 1 mA
     always0: bytes    # Unknown 3 bytes, seemingly always zero
-    unknown2: int     # Unknown final bytes: might be checksum or CRC?
+    unknown2: int     # Unknown final byte: might be checksum or CRC?
     ver: int = field(init=False, default=3, repr=False)
     rest: Optional[bytes] = field(init=False, default=None, repr=False)
 
@@ -209,10 +233,11 @@ class MysaReadingV3(MysaReading):
         self.always0, self.unknown2)
 
     def __str__(self):
-        return super().__str__() + f', voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b}'
+        return super().__str__() + f' | v3: voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b}'
 
 
 _known_reading_vers = {
     0: MysaReadingV0,
+    1: MysaReadingV1,
     3: MysaReadingV3,
 }

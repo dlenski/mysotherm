@@ -243,6 +243,7 @@ There are multiple variants/versions of the data structures in the readings;
 the first byte of each reading identifies its variant:
 
 - Mysa V1 Baseboard devices (BB-V1-1) send v0 readings
+- Mysa V1 Floor devices (INF-V1-0) send v1 readings.
 - Mysa V2 Baseboard devices (BB-V2-0 and BB-V2-0-L "Lite") send v3 readings.
 
 See the `parse_readings` function for the gory details of what we know so
