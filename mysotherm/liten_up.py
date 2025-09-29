@@ -240,7 +240,7 @@ def main(args=None):
                             packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
                             payload=json.dumps({
                                 "ComboTemp": last_sensor_temp[did],   # whatever we got last
-                                "Current": args.current * payload.body.get('dtyCycle', 1.0),
+                                "Current": None if args.current is None else args.current * payload.body.get('dtyCycle', 1.0),
                                 "Device": did,
                                 "Humidity": payload.body.get('hum', 0.0),
                                 "MainTemp": payload.body.get('ambTemp', 0.0),
