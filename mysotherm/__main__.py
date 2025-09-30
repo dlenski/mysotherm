@@ -225,12 +225,16 @@ def main(args=None):
                             elif mt == 10 and subtopic == 'out':
                                 understood = f'Post-boot message: {json.dumps(j)}'
                         elif (mt := j.pop('msg')) is not None:
-                            if mt == 40:
+                            if mt in (40, 17) and subtopic == 'out':
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('src') == {'ref': did, 'type': 1}
                                 ts = j.pop('time')
                                 body = j.pop('body')
-                                understood = f'Device (V2?) reporting its status: {json.dumps(body)}'
+                                if mt == 40:
+                                    guess = 'V2?'
+                                elif mt == 17:
+                                    guess = 'V1-INF?'
+                                understood = f'Device ({guess}) reporting its status: {json.dumps(body)}'
                             elif mt == 44 and subtopic == 'in':
                                 ts = j.pop('id') / 1000
                                 assert j.pop('ver') == '1.0'
@@ -249,7 +253,11 @@ def main(args=None):
                                 assert set(j.keys()) == {'body'}
                                 body = j.body
                                 assert body.pop('ver')
-                                weird = ' (derpy stringified cmd)' if isinstance(body['cmd'], str) else ''
+                                if isinstance(body['cmd'], str):
+                                    body['cmd'] = json.loads(body['cmd'])
+                                    weird = ' (derpy stringified cmd)'
+                                else:
+                                    weird = ''
                                 understood = f'{by} commanding device{weird}: {json.dumps(body)}'
                             elif mt == 44 and subtopic == 'out':
                                 ts = j.pop('time')
@@ -326,7 +334,7 @@ def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, speci
                 if vd.v == -1:
                     vd.v = None  # missing/invalid values, I think
 
-                if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink'):
+                if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink', 'Infloor'):
                     if d.Format == 'fahrenheit':
                         v = f'{32+vd.v*9/5:.1f}°F'
                     else:
@@ -338,19 +346,20 @@ def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, speci
                     if d.Model == 'BB-V2-0-L':
                         # From an email from Mysa support:
                         # "the Mysa V2 LITE model you have does not have a current sensor, so if there is an open load issues, it will not display the H2 error."
-                        if vd.v == 0:
+                        if vd.v in (0, None):
                             v = 'None (DEVICE HAS NO CURRENT SENSOR)'
                         else:
-                            v = f'{vd.v*1.0:.2} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
+                            v = f'{vd.v*1.0:.2f} A (UNDOCUMENTED FOR THIS DEVICE, MAY BE WRONG)'
                     else:
-                        v = f'{vd.v*1.0:.2} A (HIGHEST CURRENT SEEN)'
+                        v = f'{vd.v*1.0:.2f} A (HIGHEST CURRENT SEEN)'
                 elif k == 'Duty':
                     if d.Model == 'BB-V2-0-L' and vd.v in (0, 1):
                         v = f'{"On" if vd.v else "Off":4} (DEVICE HAS NO CURRENT SENSOR)'
                     else:
                         v = f'{vd.v*100.0:.0f}% (OF HIGHEST CURRENT)'
+                elif k in ('LineVoltage', 'Voltage'):
+                    v = f'{vd.v} V'
                 elif k == 'Brightness': v = f'{vd.v}%'
-                elif k == 'Voltage':    v = f'{vd.v} V'
                 elif k == 'Lock':       v = bool(vd.v) if vd.v in (0, 1) else vd.v
                 elif k == 'Rssi':
                     # Always set for V1 devices, but only rarely (???) for V2 devices;
