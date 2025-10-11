@@ -169,7 +169,6 @@ def main(args=None):
     p.add_argument('-u', '--user', help=f'Mysa username (default is first one configured in {CONFIG_FILE!r})')
     p.add_argument('-d', '--device', action='append', type=lambda s: s.replace(':','').lower(), help='Specific device (MAC address)')
     p.add_argument('-C', '--current', type=float, help="Estimated max current level (in Amperes). Mysa V2 Lite devices don't have current sensors.")
-    p.add_argument('-V', '--voltage', default=240, type=int, help="RMS voltage level for the heater circuit (in Volts), typically 240 V (the default) but may be 208 V or 120 V.")
     p.add_argument('-R', '--reset', action='store_true', help='Just reset faked Mysa Lite devices, and exit')
     args = p.parse_args(args)
 
@@ -236,72 +235,80 @@ def main(args=None):
     last_sensor_temp = {k: v.SensorTemp.v for k, v in r.json(object_hook=slurpy).DeviceStatesObj.items() if k in devices}
 
     # Connect to MQTT-over-WebSockets endpoint
-    cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
-    signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
-    urlp = urlparse(signed_mqtt_url)
     cid = str(uuid1())
-    with websockets.sync.client.connect(
-        urlp._replace(scheme='wss').geturl(),
-        subprotocols=('mqtt',),
-        # Seemingly not necessary for the server, but Mysa official client adds all this:
-        origin=urlp._replace(path='', params='', query='', fragment='').geturl(),
-        additional_headers={'accept-encoding': 'gzip'},
-        user_agent_header=sess.headers['user-agent'],
-    ) as ws:
-        connected_at = time()
-        ws.send(mqttpacket.connect(cid), 60)
-        timeout = time() + 60
-        pkt = mqttpacket.parse_one(ws.recv())
-        assert isinstance(pkt, mqttpacket.ConnackPacket)
+    try:
+        while True:
+            if time() > u.id_claims['exp'] - 60:
+                u.renew_access_token()  # despite the name, this also renews the id_token
+            cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
+            signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
+            urlp = urlparse(signed_mqtt_url)
+            with websockets.sync.client.connect(
+                urlp._replace(scheme='wss').geturl(),
+                subprotocols=('mqtt',),
+                # Seemingly not necessary for the server, but Mysa official client adds all this:
+                origin=urlp._replace(path='', params='', query='', fragment='').geturl(),
+                additional_headers={'accept-encoding': 'gzip'},
+                user_agent_header=sess.headers['user-agent'],
+            ) as ws:
+                connected_at = time()
+                ws.send(mqttpacket.connect(cid), 60)
+                timeout = time() + 60
+                pkt = mqttpacket.parse_one(ws.recv())
+                assert isinstance(pkt, mqttpacket.ConnackPacket)
 
-        # Subscribe to feeds for these devices
-        for ii, did in enumerate(devices, 1):
-            ws.send(mqttpacket.subscribe(ii, [
-                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
-                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
-                mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01)
-                ]))
-            timeout = time() + 60
-            pkt = mqttpacket.parse_one(ws.recv())
-            assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
-
-        try:
-            # Do the "magic upgrades"
-            # This is what causes the Mysa apps to treat these devices as BB-V1-1
-            for did in devices:
-                r = sess.post(f'{BASE_URL}/devices/{did}', json=
-                    {'Model': 'BB-V1-1', 'MaxCurrent': args.current, 'Current': args.current})  # do I need/want both?
-                r.raise_for_status()
-
-            # Await messages and translate as needed
-            while True:
-                try:
-                    pkt = mqttpacket.parse_one(ws.recv(timeout - time()))
-                    logger.debug(f'Received packet: {pkt}')
-                except TimeoutError:
-                    pkt = None
-                else:
-                    replied = translate_packet(ws, pkt, args.current, last_sensor_temp)
-                    if replied is not None:
-                        timeout = replied + 60
-
-                if time() > timeout:
-                    ws.send(mqttpacket.pingreq())
-                    logger.debug(f"Sent PINGREQ keepalive packet")
+                # Subscribe to feeds for these devices
+                for ii, did in enumerate(devices, 1):
+                    ws.send(mqttpacket.subscribe(ii, [
+                        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/out', 0x01),
+                        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/in', 0x01),
+                        mqttpacket.SubscriptionSpec(f'/v1/dev/{did}/batch', 0x01)
+                        ]))
                     timeout = time() + 60
+                    pkt = mqttpacket.parse_one(ws.recv())
+                    assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
-        except websockets.exceptions.ConnectionClosed as exc:
-            print(f"Websockets connection closed after {int(time() - connected_at)}s (rcvd={exc.rcvd}, sent={exc.sent})...")
+                # Do the "magic upgrades"
+                # This is what causes the Mysa apps to treat these devices as BB-V1-1
+                for did in devices:
+                    r = sess.post(f'{BASE_URL}/devices/{did}', json=
+                        {'Model': 'BB-V1-1', 'MaxCurrent': args.current, 'Current': args.current}   # do I need/want both?
+                    r.raise_for_status()
 
-        except KeyboardInterrupt:
-            print(f"Got interrupt (Ctrl-C) after {int(time() - connected_at)} s...")
+                try:
+                    # Await messages and translate as needed
+                    while True:
+                        try:
+                            pkt = mqttpacket.parse_one(ws.recv(timeout - time()))
+                        except TimeoutError:
+                            pass
+                        else:
+                            logger.debug(f'Received packet: {pkt}')
+                            replied = translate_packet(ws, pkt, args.current, last_sensor_temp)
+                            if replied is not None:
+                                timeout = replied + 60
 
-        finally:
-            print(f'Restoring Mysa V2 Lite thermostats to normal state...')
-            for did in devices:
-                r = sess.post(f'{BASE_URL}/devices/{did}', json={'Model': 'BB-V2-0-L'})
-                r.raise_for_status()
-                print(f'Restored Mysa thermostat {did} to model BB-V2-0-L')
+                        if time() > timeout:
+                            ws.send(mqttpacket.pingreq())
+                            logger.debug(f"Sent PINGREQ keepalive packet")
+                            timeout = time() + 60
+
+                except websockets.exceptions.ConnectionClosed as exc:
+                    print(f"Websockets connection closed after {int(time() - connected_at)}s (rcvd={exc.rcvd}, sent={exc.sent})...")
+
+                except KeyboardInterrupt:
+                    print(f"Got interrupt (Ctrl-C) after {int(time() - connected_at)} s...")
+                    break
+
+    finally:
+        if u.id_claims['exp'] < time() + 60:
+            print(f'Renewing auth tokens in order to restore Mysa V2 Lite thermostats...')
+            u.renew_access_token()
+        print(f'Restoring Mysa V2 Lite thermostats to normal state...')
+        for did in devices:
+            r = sess.post(f'{BASE_URL}/devices/{did}', json={'Model': 'BB-V2-0-L'})
+            r.raise_for_status()
+            print(f'Restored Mysa thermostat {did} to model BB-V2-0-L')
 
 
 if __name__ == '__main__':
