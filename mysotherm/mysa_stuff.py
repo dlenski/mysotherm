@@ -35,8 +35,14 @@ Mysa's Cognito Identity pool ID
 (https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-identity.html)
 """
 
-MQTT_WS_URL = "https://a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com/mqtt"
+MQTT_WS_HOST = "a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com"
 """
+Hostname for Mysa MQTT-over-WebSockets endpoint
+"""
+
+MQTT_WS_URL = f"https://{MQTT_WS_HOST}/mqtt"
+"""
+Complete HTTPS URL to initiate Mysa MQTT-over-Websockets connection
 """
 
 CLIENT_HEADERS = {
