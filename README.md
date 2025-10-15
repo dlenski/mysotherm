@@ -58,8 +58,16 @@ the required Python dependencies. Then you can inspect much of the interesting d
 for your thermostats with the login credentials that you use for the Mysa app:
 
 ```
-poetry run mysotherm -u me@whatever.com -p PASSWORD
+poetry run mysotherm
+No Mysa login credentials found in ~/.config/mysotherm
+Username: who.ever@email.com
+Password: ********
 ```
+
+After running for the first time, `mysotherm` will cache your Mysa
+authentication tokens (but _not_ your literal password) in
+`~/.config/mysotherm`, and won't prompt you for them again unless they
+expire (which will only happen if you don't use them for about a month).
 
 It should be pretty easy to add setpoint-adjusting and schedule-creating features
 to the CLI as well; I just haven't gotten around to it.
@@ -85,13 +93,17 @@ With Mysa V2 Lite, you don't get:
 
 Using the `liten-up` tool, you can "magically upgrade" your Mysa V2 Lite thermostat:
 this script tricks the app into thinking your device is a Mysa V1 thermostat, and
-then translates the slightly-incompatible setpoint messages into the correct
-format for this device.
+then does a two-way translation of the slightly-incompatible messages sent by the
+device and the app into the correct formats.
 
 Run with:
 ```
-poetry run liten-up -u me@whatever.com -p PASSWORD
+poetry run liten-up --current 5.67
 ```
+
+The `--current` option specifies the estimated current, in Amperes, drawn by
+your Mysa V2 Lite device(s). If provided, this will inform the energy usage
+shown in the app.
 
 While running, the official Mysa smartphone apps will show humidity sensor,
 zone control, and usage statistics for your Mysa V2 Lite devices.
@@ -101,11 +113,6 @@ thermostats to their original state. (And you can `poetry run liten-up --reset`
 to do this by itself.)
 
 # Future?
-
-In order to get energy usage statistics out of the Mysa V2 Lite devices, it'll
-probably be necessary to learn more about how the thermostats communicate with
-the cloud servers. They appear to connect to Amazon IoT gateway servers using
-[MQTT-over-TLS with TLS client certificate authentication on port 8883](https://docs.aws.amazon.com/iot/latest/developerguide/protocols.html#:~:text=amzn%2Dmqtt%2Dca-,MQTT,N/A,-MQTT).
 
 In order to de-cloud-itate these devices, and prevent them from the inevitable
 future bitrot/bricking, it'll likely be necessary to overcome their
