@@ -84,7 +84,8 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
                 logger.warning(f'Skipping translation of readings packet because no current level was specified.')
             else:
                 assert readings[0].ver == 3
-                last_sensor_temp[did] = readings[-1].sensor_t  # stash latest SensorTemp so we can parrot it
+                lst = last_sensor_temp[did] = readings[-1].sensor_t  # stash latest SensorTemp so we can parrot it
+                logger.debug(f"Snagged latest SensorTemp of {lst}°C from readings packet for BB-V2-0")
                 newr = b''.join(
                     bytes(MysaReadingV0(**{
                         k: getattr(r, k) for k, v in r.__dataclass_fields__.items()
@@ -131,7 +132,7 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
             opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
                 packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
                 payload=json.dumps({
-                    "ComboTemp": last_sensor_temp[did],   # whatever we got last
+                    "ComboTemp": last_sensor_temp.get(did, 0.0),   # whatever we got last
                     "Current": None if current is None else current * payload.body.get('dtyCycle', 1.0),
                     "Device": did,
                     "Humidity": payload.body.get('hum', 0.0),
