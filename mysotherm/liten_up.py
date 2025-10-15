@@ -1,6 +1,6 @@
 #!/usr/bin/env
 from argparse import ArgumentParser
-import base64
+from base64 import b64decode, b64encode
 import json
 import logging
 import os
@@ -77,7 +77,7 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
             assert payload.ver == '1.0'
             assert payload.src == {'ref': did, 'type': 1}
             body = payload.body
-            readings = MysaReading.parse_readings(base64.b64decode(body.readings))
+            readings = MysaReading.parse_readings(b64decode(body.readings))
             if readings[0].ver == 0:
                 logger.debug(f'Saw already-translated-to-v0 readings packet')
             elif current is None:
@@ -90,7 +90,7 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
                         k: getattr(r, k) for k, v in r.__dataclass_fields__.items()
                         if k not in ('voltage', 'current', 'always0', 'ver', 'rest')}))
                     for r in readings)
-                body.readings = base64.b64encode(newr).decode()
+                body.readings = b64encode(newr).decode()
                 payload.id += 1
                 opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
                     packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
@@ -184,7 +184,8 @@ def main(args=None):
     sess.auth = mysa_stuff.auther(u)
     sess.headers.update(mysa_stuff.CLIENT_HEADERS)
 
-    # This endpoint has the "real" device models, even after faking them in /devices
+    # The /users endpoint gives the "real" device models, even after faking them in /devices
+    # so it gracefully handles BB-V2-0-L devices that weren't cleanly reset after running liten-up
     r = sess.get(f'{BASE_URL}/users')
     r.raise_for_status()
     user = r.json(object_hook=slurpy).User
@@ -223,16 +224,21 @@ def main(args=None):
     for did in devices:
         if (v := firmware.get(did)) is None:
             print(f'WARNING: Your Mysa thermostat {did} has an unknown firmware version. This might not work.\n'
-                '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
+                   '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
         elif not (vmin := (3, 13, 1, 25)) <= tuple(int(x) for x in v.split('.')) <= (vmax := (3, 17, 4, 1)):
-            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v{'.'.join(map(str, vmin))}-v{'.'.join(map(str, vmax))}'
-                '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
+            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v{".".join(map(str, vmin))}-v{".".join(map(str, vmax))}'
+                   '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
+
+    # Stash the most recent SensorTemp for each device
+    r = sess.get(f'{BASE_URL}/devices/state')
+    r.raise_for_status()
+    last_sensor_temp = {k: v.SensorTemp.v for k, v in r.json(object_hook=slurpy).DeviceStatesObj.items() if k in devices}
 
     # Connect to MQTT-over-WebSockets endpoint
     cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
     signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
     urlp = urlparse(signed_mqtt_url)
-    cid = str(uuid1)
+    cid = str(uuid1())
     with websockets.sync.client.connect(
         urlp._replace(scheme='wss').geturl(),
         subprotocols=('mqtt',),
@@ -242,7 +248,7 @@ def main(args=None):
         user_agent_header=sess.headers['user-agent'],
     ) as ws:
         connected_at = time()
-        ws.send(mqttpacket.connect(str(uuid1()), 60))
+        ws.send(mqttpacket.connect(cid), 60)
         timeout = time() + 60
         pkt = mqttpacket.parse_one(ws.recv())
         assert isinstance(pkt, mqttpacket.ConnackPacket)
@@ -259,15 +265,12 @@ def main(args=None):
             assert isinstance(pkt, mqttpacket.SubackPacket) and pkt.packet_id == ii
 
         try:
-            last_sensor_temp = {}
-
             # Do the "magic upgrades"
+            # This is what causes the Mysa apps to treat these devices as BB-V1-1
             for did in devices:
                 r = sess.post(f'{BASE_URL}/devices/{did}', json=
                     {'Model': 'BB-V1-1', 'MaxCurrent': args.current, 'Current': args.current})  # do I need/want both?
                 r.raise_for_status()
-                # ... and stash the latest SensorTemp
-                last_sensor_temp[did] = sess.get(f'{BASE_URL}/devices/state/{did}').json(object_hook=slurpy).DeviceState.SensorTemp.v
 
             # Await messages and translate as needed
             while True:
