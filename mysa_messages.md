@@ -186,7 +186,7 @@ report local IP, serial number (!= device ID, otherwise hidden???), and firmware
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1:
 
-- `TYPE` is 1 for `BB-V2-0`, 4 for `BB-V2-0`, and 5 for `BB-V2-0-L`
+- `TYPE` is 1 for `BB-V1-1`, 4 for `BB-V2-0`, and 5 for `BB-V2-0-L`
 - **_Devices don't seem to respond to this command if it has the wrong type value for the device_**
 
 ```json

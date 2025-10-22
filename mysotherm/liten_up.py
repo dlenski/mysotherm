@@ -54,7 +54,7 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
             if body.type == 1:   # what the app sends for model BB-V1-1
                 body.type = 5    # ... what the model BB-V2-0-L actually wants
                 payload.id = int(time() * 1000)
-                payload.time = payload.timestamp = payload.id // 1000
+                payload.time = payload.Timestamp = payload.id // 1000
                 opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain, packet_id=pkt.packetid ^ 0x8000,
                     payload=json.dumps(payload).encode())
                 logger.debug(f"Translated command packet for BB-V1-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")

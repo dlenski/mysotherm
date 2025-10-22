@@ -262,7 +262,8 @@ def main(args=None):
                                 assert j.pop('resp') == 2
                                 assert abs(j.pop('Timestamp') - int(ts)) <= 1   # Sometimes randomly off by 1 sec
                                 assert j.pop('time') == int(ts)
-                                assert 'timestamp' not in j or j.pop('timestamp') == int(ts)
+                                # This 'timestamp'/'Timestamp' thing was due to my mistake in liten-up
+                                assert 'timestamp' not in j
                                 src = j.pop('src')
                                 if src == {'ref': user.Id, 'type': 100}:
                                     by = 'You'
