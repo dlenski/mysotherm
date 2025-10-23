@@ -6,7 +6,7 @@ from typing import Optional
 # every single time you run it, unless you set these environment variables
 # https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html
 try:
-    _env = os.environ
+    _env = os.environ.copy()
     os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'        # <-- only works if boto3 hasn't yet been imported 🤬
     #os.environ['AWS_METADATA_SERVICE_NUM_ATTEMPTS'] = '0'  # <-- works even after boto3 imported
     #os.environ['AWS_METADATA_SERVICE_TIMEOUT'] = '0'       # <-- redundant, unnecessary
