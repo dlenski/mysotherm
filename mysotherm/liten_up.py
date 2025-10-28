@@ -180,15 +180,15 @@ def main(args=None):
     r.raise_for_status()
     user = r.json(object_hook=slurpy).User
     r = sess.get(f'{BASE_URL}/devices')
-    devices = r.json(object_hook=slurpy).DevicesObj
-    real_models = {k: v.deviceType for k, v in user.DevicesPaired.State.BB.items() if k in devices}
+    devicesobj = r.json(object_hook=slurpy).DevicesObj
+    real_models = {k: v.deviceType for k, v in user.DevicesPaired.State.BB.items() if k in devicesobj}
 
     # Find applicable device(s)
     if args.device:
         for did in args.device:
             if did not in real_models:
                 p.error(f'Mysa thermostat with ID (MAC address) of {args.device} not found in your account.')
-            elif (m := real_models[args.device]) != 'BB-V2-0-L':
+            elif (m := real_models[did]) != 'BB-V2-0-L':
                 p.error(f'Your Mysa thermostat {args.device} is model {m}, not BB-V2-0-L (Mysa V2 Lite). This trick is not applicable to it.')
         devices = args.device
     else:
@@ -197,6 +197,8 @@ def main(args=None):
             p.error(f'No Mysa thermostats with model BB-V2-0-L (Mysa V2 Lite) found in your account.')
         else:
             print(f'Found {len(devices)} with model BB-V2-0-L (Mysa V2 Lite) in your account.')
+            for did in devices:
+                print(f'  {did}: {devicesobj[did].Name}')
 
     if args.reset:
         for did in devices:
