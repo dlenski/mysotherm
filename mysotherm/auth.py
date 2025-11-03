@@ -5,6 +5,7 @@ import os
 from time import time
 from typing import Optional
 
+import jwt
 import pycognito.exceptions
 from botocore.exceptions import ClientError
 
@@ -66,8 +67,8 @@ def load_credentials(
 
     id_token = config.get(section, 'id_token', fallback=None)
     refresh_token = config.get(section, 'refresh_token', fallback=None)
-    if not (id_token and refresh_token):
-        raise NotImplementedError(f'Did not find id_token and refresh_token in section {section!r} of config file {cf!r}')
+    if not (id_token or refresh_token):
+        raise NotImplementedError(f'Did not find id_token and/or refresh_token in section {section!r} of config file {cf!r}')
 
     # Authenticate with pycognito
     u = Cognito(
@@ -79,8 +80,9 @@ def load_credentials(
 
     try:
         u.verify_token(u.id_token, "id_token", "id")
-    except pycognito.TokenVerificationException:
+    except (pycognito.TokenVerificationException, jwt.exceptions.PyJWTError):
         try:
+            old = dict(id_token=u.id_token, access_token=u.access_token, refresh_token=u.refresh_token)
             u.renew_access_token()  # despite the name, this also renews the id_token
         except ClientError as exc:
             code = exc.response['Error']['Code']
@@ -89,12 +91,13 @@ def load_credentials(
             else:
                 raise
         else:
-            logger.debug(f'Successfully refreshed id_token for user {user!r}')
+            refreshed = [tn for tn, oldt in old.items() if oldt != getattr(u, tn)]
+            logger.debug(f'Successfully refreshed {", ".join(refreshed)} for user {user!r}')
             if writeback:
                 write_credentials(cf, u)
     else:
         # FIXME: What if it has been revoked prematurely. How can we check?
-        logger.debug(f'Using unexpired id_token for user {user!r}')
+        logger.debug(f'Using unexpired tokens for user {user!r}')
         u.token_type = 'Bearer'  # Shouldn't u.verify_token() do this?)
 
     assert u.id_claims['cognito:username'] == user, f"Expected user {user!r} but token is for user {u.id_claims['cognito:username']!r}"
