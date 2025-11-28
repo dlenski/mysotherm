@@ -213,11 +213,8 @@ def main(args=None):
 
                     understood = ts = orig_json = None
 
-                    # Yes, the payload can contain newlines, which technically make it invalid JSON
-                    _payload = msg.payload.replace(b'\n', b'\\n')
-
                     try:
-                        j = json.loads(_payload, object_hook=slurpy)
+                        j = json.loads(msg.payload, object_hook=slurpy, strict=False)
                         orig_json = deepcopy(j)
                         if (mt := j.pop('MsgType', None)) is not None:
                             if 'device' in j and 'timestamp' in j:

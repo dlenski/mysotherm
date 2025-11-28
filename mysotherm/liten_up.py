@@ -32,7 +32,7 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
         logger.warning("Received MQTT disconnect from server")
     elif isinstance(pkt, mqttpacket.PublishPacket):
         did, subtopic = pkt.topic.split('/')[-2:]
-        payload = json.loads(pkt.payload, object_hook=slurpy)
+        payload = json.loads(pkt.payload, object_hook=slurpy, strict=False)
         if subtopic == 'in' and payload.get('msg') == 44:
             # Setpoint message for BB-V2-0 device (we need to change $TYPE from 1 to 5):
             #
