@@ -5,15 +5,14 @@ from typing import Optional
 # boto3 is stupid AF and by default it wastes 1 second trying to connect to EC2 metadata
 # every single time you run it, unless you set these environment variables
 # https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-envvars.html
-try:
-    _env = os.environ.copy()
-    os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'        # <-- only works if boto3 hasn't yet been imported 🤬
-    #os.environ['AWS_METADATA_SERVICE_NUM_ATTEMPTS'] = '0'  # <-- works even after boto3 imported
-    #os.environ['AWS_METADATA_SERVICE_TIMEOUT'] = '0'       # <-- redundant, unnecessary
-
-    import boto3, botocore
-finally:
-    os.environ = _env
+#
+# There's lots of inconsistent caching in boto3. For semi-sanity, these environment
+# variables need to be set before importing boto3 and botocore, and persisted for
+# as long as new boto3 sessions may be created.
+os.environ['AWS_EC2_METADATA_DISABLED'] = 'true'        # <-- only works if boto3 hasn't yet been imported 🤬
+#os.environ['AWS_METADATA_SERVICE_NUM_ATTEMPTS'] = '0'  # <-- works even after boto3 imported
+#os.environ['AWS_METADATA_SERVICE_TIMEOUT'] = '0'       # <-- redundant, unnecessary
+import boto3, botocore
 
 import pycognito
 
