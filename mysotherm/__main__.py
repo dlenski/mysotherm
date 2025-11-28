@@ -360,6 +360,7 @@ def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, speci
                     vd = slurpy(v=vd, t=None)  # sometimes {"v": value, "t": timestamp}, sometimes bare value?
                 else:
                     if vd.t > 1000<<30:
+                        logger.warn(f'Attribute {k!r} for device {did} sent timestamp in ms, not s.')
                         vd.t /= 1000   # sometimes ms, sometimes seconds!? that's insane
                     if vd.t > maxts:
                         maxts = vd.t
@@ -370,7 +371,9 @@ def print_device_states(devices: slurpy, states: slurpy, firmware: slurpy, speci
                     vd.v = None  # missing/invalid values, I think
 
                 if k in ('SensorTemp', 'CorrectedTemp', 'SetPoint', 'HeatSink', 'Infloor'):
-                    if d.Format == 'fahrenheit':
+                    if vd.v in (0, None):
+                        v = 'None (UNSURE WHY)'
+                    elif d.Format == 'fahrenheit':
                         v = f'{32+vd.v*9/5:.1f}°F'
                     else:
                         v = f'{vd.v}°C'

@@ -47,7 +47,7 @@ Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
 
 ```json
 {"body": {"ambTemp": 16.7,   # I think this is "CorrectedTemp" in /devices/state
-          "dtyCycle": 1.0,   # = 1.0 when relay is on, 1.0 when off
+          "dtyCycle": 1.0,   # = 1.0 when relay is on, 0.0 when off
           "hum": 48.0,
           "stpt": 17.8
           },
@@ -64,6 +64,21 @@ sensor temperature does appear in the `/devices/state` output; where does it com
 
 **Gripe**: The `Duty` value in `/devices/state` is very laggy compared to the `dtyCycle`
 seen here.
+
+### INF-V1-0 thermostats
+
+Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
+
+```json
+{"body": {"ambTemp": 16.2,
+          "flrSnsrTemp": 22.2,
+          "hum": 58,
+          "trackedSnsr":3,       # 3 = tracking floor sensor, 5 = tracking ambient
+          "stpt":22,
+          },
+ "heatStat": 1,                  # = 1/0 (equivalent to dtyCycle for V2 devices)
+ "lineVtg": 240}
+```
 
 ## Check your settings
 
@@ -133,7 +148,7 @@ after the setpoint has changed?
  "MsgType": 1,
  "Next": 18.5,
  "Prev": 21.0,
- "Source": 3,
+ "Source": 3,             # response to 3=app command, 1=button command
  "Timestamp": $UNIXTIME}
  ```
 
@@ -186,7 +201,7 @@ report local IP, serial number (!= device ID, otherwise hidden???), and firmware
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1:
 
-- `TYPE` is 1 for `BB-V1-1`, 4 for `BB-V2-0`, and 5 for `BB-V2-0-L`
+- `TYPE` is 1 for `BB-V1-1`, 3 for `INF-V1-0`, 4 for `BB-V2-0`, and 5 for `BB-V2-0-L`
 - **_Devices don't seem to respond to this command if it has the wrong type value for the device_**
 
 ```json
@@ -207,7 +222,7 @@ Thermostat responds on `/v1/dev/$DID/out` with QOS=0:
 {"body": {"state": {"br": 50, "ho": 1, "lk": 0, "md": 3, "sp": 17.0},
           "success": 1,
           "trig_src": 3,   # response to 3=app command, 1=button command
-          "type": 5},
+          "type": $TYPE},
  "id": ${large random number},     # 64-bits long?
  "msg": 44,
  "resp_id": ${id from request},
@@ -217,8 +232,19 @@ Thermostat responds on `/v1/dev/$DID/out` with QOS=0:
  ```
 
 Instead of changing the setpoint (`"sp": $TEMP`) this can be used to change
-the mode with `"md": 1` to turn off and `"md": 3` to turn on. These appear
-to correspond to the `TstatMode` values seen in the `/devices/state` API.
+to different operating modes:
+
+- `BB-*` devices: `"md": 1` to turn off and `"md": 3` to turn on
+  These appear to correspond to the `TstatMode` values seen in the
+  `/devices/state` API.
+- `INF-V1-0` devices: these also use `"md": 1` to turn off, and
+  `"md": 3` + `"tr": 3` to track floor sensor, `"md": 5` + `"tr": 5` to
+  track ambient sensor.  The `tr` values correspond to the `TrackedSensor`
+  values seen in the `/devices/state` API.
+- All (?) devices: `{"ho": 1, "tm" -1}` to continue following the schedule,
+  or resume following it upon the next scheduled change;
+  `{"ho": 1, "tm": $UNIXTIME}` to hold until a specific time;
+  `{"ho": 2, "tm": -1}` to hold until explicitly changed.
 
 ## Delete schedule
 
