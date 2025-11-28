@@ -294,6 +294,9 @@ Sent by app to `/v1/dev/$DID/in` with QOS=0:
 }}
 ```
 
+The UUID sent in `src.ref` is mysterious. It's neither the UUID of the
+user setting the schedule, nor the UUID of the home affected.
+
 ## Readings from device
 
 Sent by device to `/v1/dev/$DID/batch` with QOS=0:

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import struct
+import traceback
 from pprint import pprint
 from urllib.parse import urlparse, urlunparse, quote
 from time import time, sleep
@@ -168,12 +169,12 @@ def main(args=None):
             print(f'Injected MQTT message to {topic!r}, with QOS=1 and contents {j!r}')
 
         timeout = time() + 60
-        last_readings_batch = {}
+        recheck_device_state_at = {}
         while True:
             now = time()
-            for did in last_readings_batch:
-                if last_readings_batch[did] and now > last_readings_batch[did] + 60:
-                    print(f'Requerying device state after raw readings received 60+ seconds ago.')
+            for did, ts in list(recheck_device_state_at.items()):
+                if now > ts:
+                    print('Requerying device state from JSON API...')
                     try:
                         states[did] = (r := sess.get(f'{BASE_URL}/devices/state/{did}')).json(object_hook=slurpy).DeviceState
                     except Exception:
@@ -181,7 +182,7 @@ def main(args=None):
                         logger.error(f"Request for device state failed: {r.status_code} {r.reason}")
                     else:
                         print_device_states(devices, states, firmware, (did,))
-                    last_readings_batch[did] = None
+                    del recheck_device_state_at[did]
 
             try:
                 msg = mqttpacket.parse_one(ws.recv(timeout - time()))
@@ -228,6 +229,7 @@ def main(args=None):
                                 understood = f'App telling device to publish its status ({json.dumps(j)})'
                             elif mt == 6 and subtopic == 'in':
                                 understood = f'App telling device to check its settings ({json.dumps(j)})'
+                                recheck_device_state_at[did] = ts
                             elif mt == 7 and subtopic == 'in':
                                 understood = f'App telling device to dump its readings ({json.dumps(j)})'
                             elif mt == 4 and subtopic == 'out':
@@ -241,6 +243,7 @@ def main(args=None):
                                 understood = f'Post-boot message: {json.dumps(j)}'
                             elif mt == 20 and subtopic == 'in':
                                 understood = f'Unknown MsgType=20, might be "check your status" similar to MsgType=6 ({json.dumps(j)})'
+                                recheck_device_state_at[did] = ts
                         elif (mt := j.pop('msg')) is not None:
                             if mt in (40, 17) and subtopic == 'out':
                                 assert j.pop('ver') == '1.0'
@@ -283,8 +286,8 @@ def main(args=None):
                                 assert j.pop('src') == {'ref': did, 'type': 1}
                                 assert abs(ts - j.pop('resp_id') / 1000) <= 5  # <=5 sec delay
                                 id_ = j.pop('id')
-                                assert set(j.keys()) == {'body'}
-                                body = j.body
+                                body = j.pop('body')
+                                assert not j
                                 assert body.pop('success') == 1
                                 if body.get('trig_src') == 3:
                                     cmd_src = 'app command'
@@ -293,6 +296,31 @@ def main(args=None):
                                 else:
                                     cmd_src = 'command of unknown trig_src'
                                 understood = f'Device responding to {cmd_src}: {json.dumps(body)} (id={id_})'
+                            elif mt == 34 and subtopic == 'in':
+                                ts = j.pop('time')
+                                assert j.pop('ver') == '1.0'
+                                assert j.pop('dest') == {'ref': did, 'type': 1}
+                                id_ = j.pop('id')
+                                src = j.pop('src')
+                                assert src.pop('type') == 302
+                                src_ref = src.pop('ref')
+                                assert not src
+                                body = j.pop('body')
+                                assert not j
+                                assert body.pop('ver') == '3.0.0'
+                                hash = body.pop('hash')
+                                events = body.pop('events')
+                                assert body.pop('totalEvents') == len(events)
+                                if events:
+                                    ctime = body.pop('createTime')
+                                    assert hash
+                                    assert src_ref
+                                    understood = f'Set schedule (source {src_ref}, createTime {ctime}, hash {hash}): {events}'
+                                else:
+                                    # assert not hash    # usually empty, but not always
+                                    assert not src_ref
+                                    understood = f'Delete schedule (hash {hash!r})'
+                                assert not body
                             elif mt == 61 and subtopic == 'out':
                                 assert j.pop('time') == 0
                                 assert j.pop('ver') == '1.0'
@@ -313,10 +341,10 @@ def main(args=None):
                                 raw = base64.b64decode(body.pop('readings'))
                                 assert not body
                                 readings = MysaReading.parse_readings(raw)
-                                last_readings_batch[did] = ts
+                                recheck_device_state_at[did] = ts + 60
                                 understood = f'Raw readings (v{readings[0].ver}):\n' + ''.join(f'  {r}\n' for r in readings)
                     except Exception as exc:
-                        print(f"Exception while parsing message payload: {exc}")
+                        print(f"Exception while parsing message payload: {traceback.format_exc()}")
                         ts = time()
 
                     if understood and ts:
