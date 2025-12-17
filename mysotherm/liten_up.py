@@ -32,7 +32,16 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
         logger.warning("Received MQTT disconnect from server")
     elif isinstance(pkt, mqttpacket.PublishPacket):
         did, subtopic = pkt.topic.split('/')[-2:]
-        payload = json.loads(pkt.payload, object_hook=slurpy, strict=False)
+        try:
+            payload = json.loads(pkt.payload, object_hook=slurpy, strict=False)
+        except json.JSONDecodeError as exc:
+            # Very rarely (every few days-weeks) I receive a packet with a
+            # malformed or incomplete JSON payload, something like:
+            #   '{"ver":"1.0","src":{"type": 1, "ref": "$DID"},"time":$UNIXTIME,"msg":44,"id":$RANDOM_HUGE_INTEGER, "resp_id":$UNIXTIMEMS, "body":'
+            # FIXME: should we ack such messages if their QOS is >0?
+            logger.warning(f"Received packet with non-JSON payload: {pkt.payload}", exc_info=exc)
+            return replied
+
         if subtopic == 'in' and payload.get('msg') == 44:
             # Setpoint message for BB-V2-0 device (we need to change $TYPE from 1 to 5):
             #
