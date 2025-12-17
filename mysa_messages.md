@@ -7,6 +7,20 @@
 - `HOME_UUID` is the UUID associated with a home (seen in `/homes` response
 - `MODEL` is `BB-V1-1` (Mysa V1 Baseboard), `BB-V2-0-L` (Mysa V2 Lite), `BB-V2-0` (Mysa V2 Baseboard), etc.
 
+## ⚠️ JSON issues
+
+All MQTT messages sent to/from Mysa's IoT gateway are *supposed to contain*
+valid JSON as their payload.  However:
+
+- Some MQTT messages contain embedded newlines in strings, which are
+  not strictly legal JSON, but can be unambiguously parsed such as with
+  Python's [`JSONDecoder` using
+  `strict=False`](https://docs.python.org/3/library/json.html#json.JSONDecoder:~:text=If%20strict%20is%20false%20(True%20is%20the%20default)%2C%20then%20control%20characters%20will%20be%20allowed%20inside%20strings.%20Control%20characters%20in%20this%20context%20are%20those%20with%20character%20codes%20in%20the%200%E2%80%9331%20range%2C%20including%20%27%5Ct%27%20(tab)%2C%20%27%5Cn%27%2C%20%27%5Cr%27%20and%20%27%5C0%27.)
+- Very occasionally, I see see "incomplete" JSON messages, e.g.
+  `{"foo": "bar", "baz":` as the payload. These are rare enough that I'm
+  not yet sure whether they come from a bug in the Mysa/AWS IoT gateway
+  server, or in the thermostat firmware, or what.
+
 ## Solicit thermostat state information
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1:
