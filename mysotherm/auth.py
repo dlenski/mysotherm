@@ -25,7 +25,7 @@ def authenticate(
     try:
         return load_credentials(user, cf, bsess, writeback)
     except NotImplementedError:
-        print(f'No Mysa login credentials found in {cf}' + ('' if user is None else f' for user {user!r}'))
+        print(f'No valid Mysa login credentials found in {cf}' + ('' if user is None else f' for user {user!r}'))
         while True:
             try:
                 user_ = input('Username: ') if user is None else user
@@ -112,7 +112,7 @@ def login(user: str, password: str, bsess: Optional[boto3.session.Session] = Non
        session=bsess,
        pool_jwk=mysa_stuff.JWKS)
     u.authenticate(password=password)
-    logger.debug('Successfully authenticated as user {user!r}')
+    logger.debug(f'Successfully authenticated as user {user!r}')
     if cf:
         write_credentials(cf, u)
     return u
