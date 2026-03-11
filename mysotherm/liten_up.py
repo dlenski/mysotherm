@@ -18,7 +18,7 @@ from .util import slurpy
 from . import mysa_stuff
 from .aws import boto3
 from .mysa_stuff import BASE_URL, MysaReading, MysaReadingV0, MysaReadingV3
-from .auth import authenticate, CONFIG_FILE
+from .auth import authenticate, login, write_credentials, CONFIG_FILE
 
 import websockets.exceptions, websockets.sync.client
 import mqttpacket.v311 as mqttpacket
@@ -238,8 +238,23 @@ def main(args=None):
     cid = str(uuid1())
     try:
         while True:
-            if time() > u.id_claims['exp'] - 60:
-                u.renew_access_token()  # despite the name, this also renews the id_token
+            # FIXME: abstract this away into mysotherm.auth.reauth, or something like that?
+            if (exp_in := time() - u.id_claims['exp']) > -60:
+                logger.info(f'Cognito ID token expired {exp_in} seconds ago, renewing...')
+                try:
+                    u.renew_access_token()  # despite the name, this also renews the id_token
+                    write_credentials(CONFIG_FILE, u)
+                    logger.info('Cognito ID token renewed.')
+                except u.client.exceptions.NotAuthorizedException:
+                    if not u._password:
+                        logger.error("Cognito refresh token is invalid or expired, can't renew.")
+                        raise
+                    else:
+                        logger.info('Cognito refresh token is invalid or expired, trying to reauthenticate...')
+                        u = login(u.id_claims['cognito:username'], u._password, bsess, CONFIG_FILE)
+                        logger.info('Cognito reauthenticated.')
+
+
             cred = u.get_credentials(identity_pool_id=mysa_stuff.IDENTITY_POOL_ID)
             signed_mqtt_url = mysa_stuff.sigv4_sign_mqtt_url(cred)
             urlp = urlparse(signed_mqtt_url)

@@ -1,3 +1,4 @@
+import binascii
 import configparser
 import getpass
 import logging
@@ -67,8 +68,11 @@ def load_credentials(
 
     id_token = config.get(section, 'id_token', fallback=None)
     refresh_token = config.get(section, 'refresh_token', fallback=None)
+    password = config.get(section, 'password_b64', fallback=None)
     if not (id_token or refresh_token):
         raise NotImplementedError(f'Did not find id_token and/or refresh_token in section {section!r} of config file {cf!r}')
+    if password is not None:
+        password = binascii.a2b_base64(password).decode()
 
     # Authenticate with pycognito
     u = Cognito(
@@ -77,6 +81,9 @@ def load_credentials(
         id_token=id_token, refresh_token=refresh_token,
         session=bsess,
         pool_jwk=mysa_stuff.JWKS)
+
+    # Monkey-stuff password into it
+    setattr(u, '_password', password)
 
     try:
         u.verify_token(u.id_token, "id_token", "id")
@@ -111,6 +118,7 @@ def login(user: str, password: str, bsess: Optional[boto3.session.Session] = Non
        username=user,
        session=bsess,
        pool_jwk=mysa_stuff.JWKS)
+    setattr(u, '_password', password)
     u.authenticate(password=password)
     logger.debug(f'Successfully authenticated as user {user!r}')
     if cf:
@@ -133,5 +141,8 @@ def write_credentials(cf: str, u: Cognito):
             config.add_section(section)
         config.set(section, 'id_token', u.id_token)
         config.set(section, 'refresh_token', u.refresh_token)
+        if getattr(u, '_password', None) is not None:
+            password_b64 = binascii.b2a_base64(u._password.encode(), newline=False).decode()
+            config.set(section, 'password_b64', password_b64)
         config.write(cf)
     logger.info(f'Successfully wrote credentials for user {user!r} to {cf.name!r}')
