@@ -68,6 +68,7 @@ def main(args=None):
     # Fetch a bunch of status info
     try:
         user = (r := sess.get(f'{BASE_URL}/users')).json(object_hook=slurpy).User
+        homes = (r := sess.get(f'{BASE_URL}/homes')).json(object_hook=slurpy).Homes
         devices = (r := sess.get(f'{BASE_URL}/devices')).json(object_hook=slurpy).DevicesObj
         states = (r := sess.get(f'{BASE_URL}/devices/state')).json(object_hook=slurpy).DeviceStatesObj
         firmware = (r := sess.get(f'{BASE_URL}/devices/firmware')).json(object_hook=slurpy).Firmware
@@ -118,6 +119,9 @@ def main(args=None):
         print("GET /devices/firmware | .json() | .Firmware")
         print("===========================================")
         pprint(firmware)
+        print("GET /homes | .json() | .Homes")
+        print("=============================")
+        pprint(homes)
 
     print_device_states(devices, states, firmware, args.device)
     if args.no_watch:
