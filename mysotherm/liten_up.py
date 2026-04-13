@@ -240,7 +240,7 @@ def main(args=None):
         while True:
             # FIXME: abstract this away into mysotherm.auth.reauth, or something like that?
             if (exp_in := time() - u.id_claims['exp']) > -60:
-                logger.info(f'Cognito ID token expired {exp_in} seconds ago, renewing...')
+                logger.info(f'Cognito ID token expired {int(exp_in)} seconds ago, renewing...')
                 try:
                     u.renew_access_token()  # despite the name, this also renews the id_token
                     write_credentials(CONFIG_FILE, u)
@@ -252,6 +252,7 @@ def main(args=None):
                     else:
                         logger.info('Cognito refresh token is invalid or expired, trying to reauthenticate...')
                         u = login(u.id_claims['cognito:username'], u._password, bsess, CONFIG_FILE)
+                        sess.auth = mysa_stuff.auther(u)
                         logger.info('Cognito reauthenticated.')
 
 
