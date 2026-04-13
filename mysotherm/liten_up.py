@@ -24,6 +24,9 @@ import websockets.exceptions, websockets.sync.client
 import mqttpacket.v311 as mqttpacket
 import requests
 
+# Device firmware versions on which this is known to work
+FW_VMIN, FW_VMAX = (3, 13, 1, 25), (3, 17, 5, 13)
+
 
 def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacket._packet.MQTTPacket, current: float, last_sensor_temp: dict[str, float]) -> Optional[int]:
     replied = None
@@ -225,8 +228,8 @@ def main(args=None):
         if (v := firmware.get(did)) is None:
             print(f'WARNING: Your Mysa thermostat {did} has an unknown firmware version. This might not work.\n'
                    '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
-        elif not (vmin := (3, 13, 1, 25)) <= tuple(int(x) for x in v.split('.')) <= (vmax := (3, 17, 4, 1)):
-            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v{".".join(map(str, vmin))}-v{".".join(map(str, vmax))}'
+        elif not FW_VMIN <= tuple(int(x) for x in v.split('.')) <= FW_VMAX:
+            print(f'WARNING: Your Mysa thermostat {did} is on firmware version {v}. This has only been tested with v{".".join(map(str, FW_VMIN))}-v{".".join(map(str, FW_VMAX))}'
                    '  Please report success or failure at https://github.com/dlenski/mysotherm/issues or via email', file=stderr)
 
     # Stash the most recent SensorTemp for each device
