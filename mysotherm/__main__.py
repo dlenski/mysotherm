@@ -41,6 +41,7 @@ def main(args=None):
     p.add_argument('--dump-token', action='store_true', help='Dump access token and cURL command.')
     p.add_argument('--check-readings', action='store_true', help='Check details of raw readings against status information.')
     p.add_argument('--inject', default=[], action='append', help='After connecting to MQTT endpoint, send this publish packet (format is topic=JSON, and may be specified multiple times)')
+    p.add_argument('--inject-dump-bin', action='store_true', help='After connecting to MQTT endpoint, tell all devices to dump their binary readings immediately.')
     args = p.parse_args(args)
 
     bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
@@ -165,11 +166,14 @@ def main(args=None):
 
         print("Connected to MQTT endpoint and subscribed to device in/out/batch topics...")
 
+        if args.inject_dump_bin:
+            now = int(time())
+            args.inject.extend([f'/v1/dev/{did}/in={{"Device":"{did}","Timestamp":{now},"MsgType":7}}'
+                               for did in (args.device or devices)])
+
         for ii, ij in enumerate(args.inject):
             topic, j = ij.split('=', 1)
             ws.send(mqttpacket.publish(topic, False, 1, False, packet_id=ii ^ 0x9000, payload=j.encode()))
-            pkt = mqttpacket.parse_one(ws.recv())
-            assert isinstance(pkt, mqttpacket.PubackPacket) and pkt.packet_id == ii ^ 0x9000
             print(f'Injected MQTT message to {topic!r}, with QOS=1 and contents {j!r}')
 
         timeout = time() + 60
@@ -197,7 +201,8 @@ def main(args=None):
                 logger.debug(f"Sent PINGREQ keepalive packet")
                 timeout = now + 60
             else:
-                if isinstance(msg, mqttpacket._packet.PingrespPacket):
+                if isinstance(msg, (mqttpacket._packet.PingrespPacket,
+                                    mqttpacket._packet.PubackPacket)):
                     pass
                 elif isinstance(msg, mqttpacket.PublishPacket):
                     did, subtopic = msg.topic.split('/')[-2:]
