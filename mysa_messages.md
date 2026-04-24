@@ -94,6 +94,21 @@ Sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
  "lineVtg": 240}
 ```
 
+Also sometimes sent by thermostat to `/v1/dev/$DID/out` with QOS=0:
+
+```json
+{"ver": "1.0",
+ "src": {"type": 1, "ref": "$DID"},
+ "time": 0, "msg": 16,
+ "id": ${large random number},     # 64-bits long?
+ "body": {"dutyCycle": 0.5212,     # this value seems like garbage/nonsense, always around 0.5
+          "prevLnVolt": 240,       # why would the line voltage change? yikes
+          "currLnVolt": 240,
+          "currAveMVolt": 1720,    # what on earth is this?
+          "gfciStatus": 0}
+}
+```
+
 ## Check your settings
 
 Sent by app to `/v1/dev/$DID/in` with QOS=1. Appears to indicate to the thermostat

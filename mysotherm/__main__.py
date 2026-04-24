@@ -249,7 +249,7 @@ def main(args=None):
                                 understood = f'Unknown MsgType=20, might be "check your status" similar to MsgType=6 ({json.dumps(j)})'
                                 recheck_device_state_at[did] = ts
                         elif (mt := j.pop('msg')) is not None:
-                            if mt in (40, 17) and subtopic == 'out':
+                            if mt in (40, 17, 16) and subtopic == 'out':
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('src') == {'ref': did, 'type': 1}
                                 ts = j.pop('time')
@@ -258,6 +258,8 @@ def main(args=None):
                                     guess = 'V2?'
                                 elif mt == 17:
                                     guess = 'V1-INF?'
+                                elif mt == 16:
+                                    guess = 'weird msg=16 from V1-INF?'
                                 understood = f'Device ({guess}) reporting its status: {json.dumps(body)}'
                             elif mt == 44 and subtopic == 'in':
                                 ts = j.pop('id') / 1000
