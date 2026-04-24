@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 from time import time
+from functools import reduce
 import struct
 
 import botocore
@@ -199,7 +200,8 @@ class MysaReadingV0(MysaReading):
         return struct.pack('<B', self.unknown2)
 
     def __str__(self):
-        return super().__str__() + f' | v0: unk2?={self.unknown2:08b}'
+        csum = reduce(int.__xor__, bytes(self)[:-1])
+        return super().__str__() + f' | v0: unk2?={self.unknown2:08b} | csum={csum:08b}'
 
 
 @dataclass
@@ -222,7 +224,8 @@ class MysaReadingV1(MysaReading):
         return struct.pack('<hB', self.voltage, self.unknown2)
 
     def __str__(self):
-        return super().__str__() + f' | v1: voltage={self.voltage}V, unk2?={self.unknown2:08b}'
+        csum = reduce(int.__xor__, bytes(self)[:-1])
+        return super().__str__() + f' | v1: voltage={self.voltage}V, unk2?={self.unknown2:08b} | csum={csum:08b}'
 
 
 @dataclass
@@ -250,7 +253,8 @@ class MysaReadingV3(MysaReading):
         self.always0, self.unknown2)
 
     def __str__(self):
-        return super().__str__() + f' | v3: voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b}'
+        csum = reduce(int.__xor__, bytes(self)[:-1])
+        return super().__str__() + f' | v3: voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b} | csum={csum:08b}'
 
 
 _known_reading_vers = {
