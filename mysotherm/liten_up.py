@@ -89,10 +89,11 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
                 assert readings[0].ver == 3
                 lst = last_sensor_temp[did] = readings[-1].sensor_t  # stash latest SensorTemp so we can parrot it
                 logger.debug(f"Snagged latest SensorTemp of {lst}°C from readings packet for BB-V2-0")
+                # FIXME: checksum=None is a hack to force it to be recalculated
                 newr = b''.join(
-                    bytes(MysaReadingV0(**{
+                    bytes(MysaReadingV0(checksum=None, ver=0, **{
                         k: getattr(r, k) for k, v in r.__dataclass_fields__.items()
-                        if k not in ('voltage', 'current', 'always0', 'ver', 'rest')}))
+                        if k not in ('voltage', 'current', 'always0', 'ver', 'checksum')}))
                     for r in readings)
                 body.readings = b64encode(newr).decode()
                 payload.id += 1

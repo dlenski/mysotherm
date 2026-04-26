@@ -185,17 +185,20 @@ class MysaReading:
                 f'hum={self.humidity}%, dty={self.duty}%, on?={self.on_ms}ms, off?={self.off_ms}ms, heatsink={self.heatsink_t:.1f}°C, '
                 f'freeheap={self.free_heap}, rssi={self.rssi}{"" if self.rssi is None else "dBm"}, onoroff={self.onoroff}'
                 + ('' if self.unknown is None else f', ?unknown?={self.unknown.hex()}')
-                + (f', checksum={self.checksum:02x}' + ('' if self.checksum_good else f' ! should be {checksum_right:02x}!'))
+                + f', checksum={self.checksum:02x}' + ('' if self.checksum_good else f' ! should be {checksum_right:02x}!'))
 
     def __bytes__(self):
-        return b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbb', self.ver, self.ts,
+        b = b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbb', self.ver, self.ts,
             int(self.sensor_t * 10), int(self.ambient_t * 10), int(self.setpoint_t * 10),  # On-the-wire unit = 0.1°
             self.humidity, self.duty,
             self.on_ms // 100, self.off_ms // 100,  # On-the-wire-unit = 100 ms
             int(self.heatsink_t * 10),              # On-the-wire unit = 0.1°C
             self.free_heap // 10,                   # On-the-wire unit = 10 (of something)
             -self.rssi,                             # On-the-wire unit = -1 dBm
-            self.onoroff) + self._pack_rest() + bytes((self.checksum,))
+            self.onoroff) + self._pack_rest()
+        # FIXME: setting checksum=None forces it to be recalculated
+        b_cs = bytes((reduce(int.__xor__, b) if self.checksum is None else self.checksum,))
+        return b + b_cs
 
 
 @dataclass
