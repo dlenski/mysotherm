@@ -344,15 +344,18 @@ data from the devices' sensors, typically at 30 second intervals, and sent
 by the devices to the MQTT servers in batches covering 10-15 minutes typically.
 
 There are multiple variants/versions of the data structures in the readings;
-the first byte of each reading identifies its variant:
+after a two-byte magic number, the third byte of each reading identifies its
+variant:
 
 - Mysa V1 Baseboard devices (BB-V1-1) send v0 readings
 - Mysa V1 Floor devices (INF-V1-0) send v1 readings.
 - Mysa V2 Baseboard devices (BB-V2-0 and BB-V2-0-L "Lite") send v3 readings.
 
+All variants include a simple XOR checksum byte at the end, such that
+`reduce(int.__xor__, complete_reading_bytes) == 0`.
 See the `parse_readings` function for the gory details of what is understood
-so far, which is basically everything except for the final byte (which might
-be some kind of checksum or CRC).
+so far, which is basically everything except for a field at the end of the
+v3 readings which is usually but not always zero.
 
 ## Account management
 
