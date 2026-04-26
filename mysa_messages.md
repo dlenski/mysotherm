@@ -32,7 +32,8 @@ Sent by app to `/v1/dev/$DID/in` with QOS=1:
  "Timestamp": $UNIXTIME}
  ```
 
- … and this should cause the device to report its state promptly.
+… and this should cause the device to report its state promptly, and to
+continue doing so frequently (in this case for 180 seconds).
 
 ## Device state
 
@@ -138,7 +139,9 @@ curl /devices/$DID -d '{"TimeZone": "$WHATEVER"}'
 ## Dump your readings
 
 Appears to indicate to the thermostat that it should immediately dump its readings in the binary format
-(see [below](#readings-from-device)):
+(see [below](#readings-from-device)). It also seems to trigger the dumping of some
+[log messages](#generic-device-log-message) and boot/firmware diagnostic messages a short
+while later:
 
 ```json
 {"Device": "$DID",
@@ -163,9 +166,10 @@ supposedly doesn't have:
   - It doesn't show usage/cost due to the absence of the expected current sensor
   - If Mysa _wanted_ to implement this properly, they could still show usage based on duty cycle of the relay
 
-The _huge caveat_ of this is that the thermostat can't be adjust via the app as long
-as the "magic upgrade" is in place. This appears to be due to slightly different signalling
-used to send setpoint updates for different models. (See "Change setpoint or mode" below.)
+The _huge caveat_ of this is that the thermostat can't be adjusted via the app as long
+as the "magic upgrade" is in place. This appears to be due to ever-so-slightly different
+signalling used to send setpoint updates for different models. (See below on
+[changing setpoint or mode](#change-setpoint-or-mode).)
 
 ## Unknown
 
@@ -325,6 +329,13 @@ Sent by app to `/v1/dev/$DID/in` with QOS=0:
 
 The UUID sent in `src.ref` is mysterious. It's neither the UUID of the
 user setting the schedule, nor the UUID of the home affected.
+
+Sometimes the app only updates a portion of the `totalEvents` (e.g. `events`
+contains 10 entries but `totalEvents=14`), and then follows up with
+further messages to update the rest of the events. This might be due to some
+buffer size constraint in some of the devices, or some middleware; MQTT itself
+has vastly higher packet size limits, and the binary readings packets are
+often much larger than the set-schedule packets.
 
 ## Readings from device
 

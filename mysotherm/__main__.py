@@ -241,8 +241,15 @@ def main(args=None):
                                 recheck_device_state_at[did] = ts
                             elif mt == 7 and subtopic == 'in':
                                 understood = f'App telling device to dump its readings ({json.dumps(j)})'
+                            elif mt == 40 and subtopic == 'in':
+                                eid = j.pop('EchoID')
+                                understood = f'Killer ping command with EchoID={eid} ({json.dumps(j)})'
+                            elif mt == 5 and subtopic == 'out':
+                                eid = j.pop('EchoID')
+                                understood = f'Killer ping response ({json.dumps(j)})'
                             elif mt == 4 and subtopic == 'out':
-                                understood = f'Device log [{j.Level}] {j.Message}'
+                                level, message = j.pop('Level'), j.pop('Message')
+                                understood = f'Device log [{level}] {message} ({json.dumps(j)})'
                             elif mt == 0 and subtopic == 'out':
                                 assert j.pop('Stream') == 1
                                 understood = f'Device (V1?) reporting its status: {json.dumps(j)}'
@@ -321,13 +328,15 @@ def main(args=None):
                                 assert body.pop('ver') == '3.0.0'
                                 hash = body.pop('hash')
                                 events = body.pop('events')
-                                assert body.pop('totalEvents') == len(events)
+                                nevents = body.pop('totalEvents')
                                 if events:
+                                    assert len(events) <= nevents
                                     ctime = body.pop('createTime')
                                     assert hash
                                     assert src_ref
-                                    understood = f'Set schedule (source {src_ref}, createTime {ctime}, hash {hash}): {events}'
+                                    understood = f'Set schedule (source {src_ref}, createTime {ctime}, hash {hash}), {len(events)}/{nevents} events: {events}'
                                 else:
+                                    assert nevents == 0
                                     # assert not hash    # usually empty, but not always
                                     assert not src_ref
                                     understood = f'Delete schedule (hash {hash!r})'
