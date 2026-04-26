@@ -116,21 +116,22 @@ class MysaReading:
 
     All of them appear to share a certain set of fields and meanings, but they vary
     in additional fields and overall length.'''
-    ts: int                 # Unix time (seconds)
-    sensor_t: float         # Unit = °C
-    ambient_t: float        # Unit = °C
-    setpoint_t: float       # Unit = °C
-    humidity: int           # Percent
-    duty: int               # Percent
-    on_ms: int              # Unit = 1 ms
-    off_ms: int             # Unit = 1 ms
-    heatsink_t: float       # Unit = °C
-    free_heap: int          # Free heap (what IS this?)
-    rssi: int               # Unit = 1 dBm; frequently-but-not-always (???) stuck at 1 for BB-V2-0(-L) devices
-    onoroff: int            # Probably boolean, not int
-
-    rest: Optional[bytes]   # TRAILING bytes, overridden in child classes
-    ver: int                # LEADING version byte, overridden in child classes
+    ver: int                  # LEADING version byte, overridden in child classes
+    ts: int                   # Unix time (seconds)
+    sensor_t: float           # Unit = °C
+    ambient_t: float          # Unit = °C
+    setpoint_t: float         # Unit = °C
+    humidity: int             # Percent
+    duty: int                 # Percent
+    on_ms: int                # Unit = 1 ms
+    off_ms: int               # Unit = 1 ms
+    heatsink_t: float         # Unit = °C
+    free_heap: int            # Free heap (what IS this?)
+    rssi: int                 # Unit = 1 dBm; frequently-but-not-always (???) stuck at 1 for BB-V2-0(-L) devices
+    onoroff: int              # Probably boolean, not int
+    checksum: int             # Final byte (simple XOR checksum of preceding)
+    checksum_good: bool
+    unknown: Optional[bytes]  # Bytes before final checksum, overridden in child classes
 
     @classmethod
     def parse_readings(cls, readings: bytes) -> list['MysaReading']:
@@ -140,6 +141,7 @@ class MysaReading:
         ver = readings[2]
         output = []
         while offset < len(readings):
+            _start = offset
             assert readings[offset: offset+2] == b'\xca\xa0' # All should have same prefix
             assert readings[offset+2] == ver                 # ... and same version
             offset += 3
@@ -150,25 +152,40 @@ class MysaReading:
             rssi = -rssi                                        # On-the-wire-unit = -1 dBm
             onish *= 100; offish *= 100                         # On-the-wire-unit = 100 ms
             args = [sts, sens, amb, setp, hum, duty, onish, offish, heatsink, heap, rssi, onoroff]
-            reading, offset = _known_reading_vers.get(ver, cls)._make_reading(ver, args, readings, offset)
-            output.append(reading)
+
+            if _cls := _known_reading_vers.get(ver):
+                rest, offset = _cls._unpack_rest(readings, offset)
+                unknown = None
+            else:
+                # Find the start of the next reading for an *unknown* version. Hopefully there are
+                # no inadvertent matching bytes!!
+                if (end := readings.find(bytes((0xca, 0xa0, ver)), offset + 1)) < 0:
+                    end = len(readings)
+                unknown = readings[offset: end-1] if end > offset + 1 else None
+                _cls = cls
+
+            csum = readings[offset]
+            offset += 1
+            csum_good = reduce(int.__xor__, readings[_start: offset]) == 0
+
+            output.append(_cls(
+                ver=ver, ts=sts, sensor_t=sens, ambient_t=amb, setpoint_t=setp, humidity=hum, duty=duty,
+                on_ms=onish, off_ms=offish, heatsink_t=heatsink, free_heap=heap, rssi=rssi, onoroff=onoroff,
+                unknown=unknown, checksum=csum, checksum_good=csum_good, **rest))
+            #assert bytes(reading) == readings[_start: offset], f'\n{bytes(reading)} != \n{readings[_start: offset]}'
         return output
 
-    @classmethod
-    def _make_reading(cls, ver, args, readings, offset):
-        if (end := readings.find(bytes((0xca, 0xa0, ver)), offset)) < 0:  # Hopefully no inadvertent matching bytes!!
-            end = len(readings)
-        return cls(*args, rest=readings[offset:end], ver=ver), end
-
     def _pack_rest(self):
-        assert self.rest is not None, repr(self)
-        return self.rest
+        return self.unknown or b''
 
     def __str__(self):
+        if not self.checksum_good:
+            checksum_right = reduce(int.__xor__, bytes(self)[:-1])
         return (f'{datetime.fromtimestamp(self.ts)}: sens={self.sensor_t:.1f}°C, amb={self.ambient_t:.1f}°C, setp={self.setpoint_t:.1f}°C, '
                 f'hum={self.humidity}%, dty={self.duty}%, on?={self.on_ms}ms, off?={self.off_ms}ms, heatsink={self.heatsink_t:.1f}°C, '
                 f'freeheap={self.free_heap}, rssi={self.rssi}{"" if self.rssi is None else "dBm"}, onoroff={self.onoroff}'
-                + ('' if self.rest is None else f', rest?={self.rest.hex()}'))
+                + ('' if self.unknown is None else f', ?unknown?={self.unknown.hex()}')
+                + (f', checksum={self.checksum:02x}' + ('' if self.checksum_good else f' ! should be {checksum_right:02x}!'))
 
     def __bytes__(self):
         return b'\xca\xa0' + struct.pack('<bLhhhbbhhhHbb', self.ver, self.ts,
@@ -178,7 +195,7 @@ class MysaReading:
             int(self.heatsink_t * 10),              # On-the-wire unit = 0.1°C
             self.free_heap // 10,                   # On-the-wire unit = 10 (of something)
             -self.rssi,                             # On-the-wire unit = -1 dBm
-            self.onoroff) + self._pack_rest()
+            self.onoroff) + self._pack_rest() + bytes((self.checksum,))
 
 
 @dataclass
@@ -187,22 +204,9 @@ class MysaReadingV0(MysaReading):
 
     This version is used by the thermostat with model number BB-V1-1 ("Mysa Baseboard V1"),
     and maybe others.'''
-    unknown2: int     # Unknown final byte: might be checksum or CRC?
-    ver: int = field(init=False, default=0, repr=False)
-    rest: Optional[bytes] = field(init=False, default=None, repr=False)
-
     @classmethod
-    def _make_reading(cls, ver, args, readings, offset):
-        unknown2, = struct.unpack_from('<B', readings, offset)
-        return cls(*args, unknown2=unknown2), offset + 1
-
-    def _pack_rest(self):
-        return struct.pack('<B', self.unknown2)
-
-    def __str__(self):
-        csum = reduce(int.__xor__, bytes(self)[:-1])
-        return super().__str__() + f' | v0: unk2?={self.unknown2:08b} | csum={csum:08b}'
-
+    def _unpack_rest(cls, readings: bytes, offset):
+        return {}, offset
 
 @dataclass
 class MysaReadingV1(MysaReading):
@@ -210,22 +214,18 @@ class MysaReadingV1(MysaReading):
 
     This version is used by the thermostat with model number INF-V1-0 ("Mysa Floor"),
     and maybe others.'''
-    unknown2: int     # Unknown final byte: might be checksum or CRC?
     voltage: int      # Unit = 1 V
-    ver: int = field(init=False, default=1, repr=False)
-    rest: Optional[bytes] = field(init=False, default=None, repr=False)
 
     @classmethod
-    def _make_reading(cls, ver, args, readings, offset):
-        voltage, unknown2 = struct.unpack_from('<hB', readings, offset)
-        return cls(*args, voltage=voltage, unknown2=unknown2), offset + 3
+    def _unpack_rest(cls, readings: bytes, offset):
+        voltage, = struct.unpack_from('<h', readings, offset)
+        return {'voltage': voltage}, offset + 2
 
     def _pack_rest(self):
-        return struct.pack('<hB', self.voltage, self.unknown2)
+        return struct.pack('<h', self.voltage)
 
     def __str__(self):
-        csum = reduce(int.__xor__, bytes(self)[:-1])
-        return super().__str__() + f' | v1: voltage={self.voltage}V, unk2?={self.unknown2:08b} | csum={csum:08b}'
+        return super().__str__() + f' | v1: voltage={self.voltage}V'
 
 
 @dataclass
@@ -237,24 +237,20 @@ class MysaReadingV3(MysaReading):
     voltage: int      # Unit = 1 V
     current: int      # Unit = 1 mA
     always0: bytes    # Unknown 3 bytes, seemingly always zero
-    unknown2: int     # Unknown final byte: might be checksum or CRC?
-    ver: int = field(init=False, default=3, repr=False)
-    rest: Optional[bytes] = field(init=False, default=None, repr=False)
 
     @classmethod
-    def _make_reading(cls, ver, args, readings, offset):
-        voltage, current, always0, unknown2 = struct.unpack_from('<hh3sB', readings, offset)
+    def _unpack_rest(cls, readings: bytes, offset):
+        voltage, current, always0 = struct.unpack_from('<hh3s', readings, offset)
         current *= 10                           # On-the-wire unit = 10 mA
-        return cls(*args, voltage=voltage, current=current, always0=always0, unknown2=unknown2), offset + 8
+        return {'voltage': voltage, 'current': current, 'always0': always0}, offset + 7
 
     def _pack_rest(self):
-        return struct.pack('<hh3sB', self.voltage,
-        self.current // 10,  # On-the-wire unit = 10 mA
-        self.always0, self.unknown2)
+        return struct.pack('<hh3s', self.voltage,
+            self.current // 10,  # On-the-wire unit = 10 mA
+            self.always0)
 
     def __str__(self):
-        csum = reduce(int.__xor__, bytes(self)[:-1])
-        return super().__str__() + f' | v3: voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}, unk2?={self.unknown2:08b} | csum={csum:08b}'
+        return super().__str__() + f' | v3: voltage={self.voltage}V, cur={self.current}mA, zero?={self.always0.hex()}'
 
 
 _known_reading_vers = {
