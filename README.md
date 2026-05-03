@@ -124,6 +124,18 @@ future bitrot/bricking, it'll likely be necessary to overcome their
 - https://github.com/mitmproxy/mitmproxy and https://github.com/nikitastupin/mitmproxy-mqtt-script
   for making it easy to MITM the traffic to/from the devices
 
+# Other projects
+
+For me, _this_ project is mostly about hacking and exploring what the Mysas can do.
+I haven't tried to develop anything particularly polished or end-user focused. Other projects
+have picked up what I've discovered about Mysa authentication, API, and binary packet
+decoding, and built some cool stuff with it. ✨
+
+* Pascal Bourque's [mysa2mqtt](https://github.com/bourquep/mysa2mqtt),
+  a Node.js application to bridge Mysa smart thermostats to a standard MQTT server
+* Keven Gelinas's [Mysa_HA](https://github.com/kgelinas/Mysa_HA),
+  a cloud-based Home Assistant integration for Mysa 
+
 # License
 
 GPLv3 or later
