@@ -10,13 +10,21 @@ Inspect and manipulate Mysa smart thermostats.
 They're subsidized and promoted by utility companies including [BC Hydro](https://bchydro.com).
 
 They have free Android and iOS apps, and they apparently integrate with other home automation
-stuff that I know nothing about and have never used.
+stuff that I ~~know nothing about and have never used~~ knew nothing about when I acquired
+the devices, although now I've gotten into HomeAssistant so I've learned more about
+the _de facto_ standard HomeKit protocol.
 
 My concerns:
 
 - The devices appear to be entirely "cloud-dependent": communication with the thermostats goes through
   AWS cloud services and there is no known
   [local network API](https://www.reddit.com/r/smarthome/comments/18z22f0/mysa_thermostat_lan_api/)
+  that provides all the thermostat hardware (the
+  [HomeKit](https://en.wikipedia.org/wiki/Apple_Home#HomeKit_standard:~:text=HomeKit%20Accessory%20Protocol)
+  protocol does provide *many* features, but not all)
+  - Relatedly, I discovered [a severe wide-open remote-access vulnerability](https://snowpatch.org/posts/i-can-completely-control-your-smart-thermostat)
+    in Mysa's cloud servers shortly after beginning work on this project. I disclosed it to Mysa, who
+    fixed it quickly.
 - As Mysa puts it,
   ["No fees (for real). All the features."](https://getmysa.com/pages/app-ca#:~:text=Free%20app.%20No%20fees%20(for%20real).%0AAll%20the%20features.)
   However, if you have their more inexpensive Mysa Lite device then you don't get in-app charting of temperature
@@ -47,7 +55,7 @@ the short summary is that Mysa is doing the AWS SigV4 "URL presigning" in an unu
 and potentially insecure way.
 
 I've figured out what most of the MQTT messages sent between the app and the thermostats mean.
-See [mysa_messages.md](./mysa_messages.md) for some semi-structured notes.
+See [`docs/mysa_messages.md`](docs/mysa_messages.md) for some semi-structured notes.
 
 ## Inspecting Mysa thermostat devices
 
@@ -112,9 +120,12 @@ to do this by itself.)
 
 # Future?
 
-In order to de-cloud-itate these devices, and prevent them from the inevitable
+In order to de-cloud-itate these devices, and spare them from the inevitable
 future bitrot/bricking, it'll likely be necessary to overcome their
 [certificate pinning](https://docs.mitmproxy.org/stable/concepts-certificates/#certificate-pinning).
+
+See [`docs/mysa_wifi_pairing.md#replacing-certificates`](docs/mysa_wifi_pairing.md#replacing-certificates)
+for how to do so.
 
 # Credits
 
@@ -134,7 +145,7 @@ decoding, and built some cool stuff with it. ✨
 * Pascal Bourque's [mysa2mqtt](https://github.com/bourquep/mysa2mqtt),
   a Node.js application to bridge Mysa smart thermostats to a standard MQTT server
 * Keven Gelinas's [Mysa_HA](https://github.com/kgelinas/Mysa_HA),
-  a cloud-based Home Assistant integration for Mysa 
+  a cloud-based Home Assistant integration for Mysa
 
 # License
 
