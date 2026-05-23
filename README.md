@@ -67,8 +67,41 @@ authentication tokens (but _not_ your literal password) in
 `~/.config/mysotherm`, and won't prompt you for them again unless they
 expire (which will only happen if you don't use them for about a month).
 
-It should be pretty easy to add setpoint-adjusting and schedule-creating features
-to the CLI as well; I just haven't gotten around to it.
+## Controlling Mysa thermostat devices
+
+`mysotherm` can also send commands to your thermostat(s). Each control option below
+sends the relevant `msg:44` command (see [mysa_messages.md](./mysa_messages.md)), waits
+for the device to acknowledge it, and then exits — so it's easy to use from scripts and
+other automations. Control commands require an explicit `--device` list, and `mysotherm`
+exits `0` only if **every** named device acknowledged its command (non-zero otherwise).
+
+```
+poetry run mysotherm --device AA:BB:CC:DD:EE:FF --resume-schedule
+poetry run mysotherm --device AA:BB:CC:DD:EE:FF --set-point 18.5
+poetry run mysotherm --device AA:BB:CC:DD:EE:FF --fahrenheit --set-point 68
+poetry run mysotherm --device AA:BB:CC:DD:EE:FF --set-point 10 --hold-until 1736700658
+poetry run mysotherm --device AA:BB:CC:DD:EE:FF --mode off
+```
+
+- `--set-point TEMP` — set the target temperature (°C by default). On its own this mirrors
+  what the app sends: the new setpoint holds only **until the next scheduled change**. To
+  make it persist, combine it with `--hold` (indefinitely) or `--hold-until` (until a time).
+- `--fahrenheit` / `-F` — interpret `--set-point` as °F (converted to the nearest 0.5°C,
+  which is the resolution Mysa uses internally).
+- `--mode {off,on,floor,ambient}` — set the operating mode. Use `off`/`on` for baseboard
+  models; use `floor`/`ambient` (the tracked sensor) for floor (`INF-V1-0`) models.
+- `--resume-schedule` — clear any manual hold and resume following the schedule at the
+  next scheduled change.
+- `--hold` — hold the current (or given) setting indefinitely, until explicitly changed.
+- `--hold-until UNIXTIME` — hold the current (or given) setting until a Unix time, then
+  resume the schedule automatically. Handy for an "I'm away until then" setpoint:
+  `--set-point 10 --hold-until <when-you-return>`.
+
+`mysotherm` automatically picks the correct per-model command `type` code, so commands
+work across mixed fleets of baseboard, floor, V2, and V2 Lite devices.
+
+(Creating/editing schedules is documented in [mysa_messages.md](./mysa_messages.md) but
+not yet exposed on the CLI.)
 
 (I only own Mysa Baseboard V1 and V2 Lite devices. Would be very interested to learn
 if other devices have other kinds of data.)
