@@ -131,6 +131,10 @@ I haven't tried to develop anything particularly polished or end-user focused. O
 have picked up what I've discovered about Mysa authentication, API, and binary packet
 decoding, and built some cool stuff with it. ✨
 
+* Nikita Sokolsky's [mysa-client](https://github.com/SokolskyNikita/mysa-client) Python library,
+  and [mysa-homeassistant](https://github.com/SokolskyNikita/mysa-homeassistant) Home Assistant
+  integration. Very nicely-designed, attempts to use the HomeKit API as much as possible, and
+  only to fallback to the cloud-based APIs when required.
 * Pascal Bourque's [mysa2mqtt](https://github.com/bourquep/mysa2mqtt),
   a Node.js application to bridge Mysa smart thermostats to a standard MQTT server
 * Keven Gelinas's [Mysa_HA](https://github.com/kgelinas/Mysa_HA),
