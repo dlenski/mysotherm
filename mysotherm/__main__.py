@@ -277,7 +277,7 @@ def main(args=None):
                                 ts = j.pop('id') / 1000
                                 assert j.pop('ver') == '1.0'
                                 assert j.pop('dest') == {'ref': did, 'type': 1}
-                                assert j.pop('resp') == 2
+                                assert 'resp' not in j or j.pop('resp') == 2    # Newer versions of the app don't send this
                                 assert abs(j.pop('Timestamp') - int(ts)) <= 1   # Sometimes randomly off by 1 sec
                                 assert j.pop('time') == int(ts)
                                 # This 'timestamp'/'Timestamp' thing was due to my mistake in liten-up

@@ -53,13 +53,13 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
             #  "dest": {"ref": "$DID", "type": 1},
             #  "id": $UNIXTIMEMS,
             #  "msg": 44,
-            #  "resp": 2,
+            #  "resp": 2,         # <- newer versions of the app don't send this
             #  "src": {"ref": "$USER_UUID", "type": 100},
             #  "time": $UNIXTIME,
             #  "ver": "1.0"}
 
             assert payload.ver == "1.0"
-            assert payload.resp == 2
+            assert 'resp' not in payload or payload.resp == 2
             assert payload.dest == {'ref': did, 'type': 1}
             body = payload.body
             assert body.ver == 1
@@ -67,7 +67,9 @@ def translate_packet(ws: websockets.sync.client.ClientConnection, pkt: mqttpacke
                 body.type = 5    # ... what the model BB-V2-0-L actually wants
                 payload.id = int(time() * 1000)
                 payload.time = payload.Timestamp = payload.id // 1000
-                opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain, packet_id=pkt.packetid ^ 0x8000,
+                opkt = mqttpacket.publish(pkt.topic, pkt.dup, pkt.qos, pkt.retain,
+                    # newer app versions don't always sent packetid (because they don't always use QOS > 0 here)
+                    packet_id=pkt.packetid ^ 0x8000 if pkt.packetid else None,
                     payload=json.dumps(payload).encode())
                 logger.debug(f"Translated command packet for BB-V1-0 into BB-V2-0-L: {mqttpacket.parse_one(opkt)}")
 

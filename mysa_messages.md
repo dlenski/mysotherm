@@ -232,7 +232,8 @@ report local IP, serial number (!= device ID, otherwise hidden???), and firmware
 
  ## Change setpoint or mode
 
-Sent by app to `/v1/dev/$DID/in` with QOS=1:
+Sent by app to `/v1/dev/$DID/in` with QOS=1 or QOS=0 (the latter with newer
+app versions):
 
 - `TYPE` is 1 for `BB-V1-1`, 3 for `INF-V1-0`, 4 for `BB-V2-0`, and 5 for `BB-V2-0-L`
 - **_Devices don't seem to respond to this command if it has the wrong type value for the device_**
@@ -243,7 +244,7 @@ Sent by app to `/v1/dev/$DID/in` with QOS=1:
  "dest": {"ref": "$DID", "type": 1},
  "id": $UNIXTIMEMS,
  "msg": 44,
- "resp": 2,
+ "resp": 2,      # newer app versions don't send this
  "src": {"ref": "$USER_UUID", "type": 100},
  "time": $UNIXTIME,
  "ver": "1.0"}
