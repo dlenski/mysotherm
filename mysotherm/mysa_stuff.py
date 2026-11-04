@@ -56,6 +56,17 @@ CLIENT_HEADERS = {
 BASE_URL = 'https://app-prod.mysa.cloud'
 """Base URL for Mysa's JSONful API"""
 
+COMMAND_TYPE_BY_MODEL = {
+    'BB-V1-1': 1,    # Mysa V1 Baseboard
+    'INF-V1-0': 3,   # Mysa Floor
+    'BB-V2-0': 4,    # Mysa V2 Baseboard
+    'BB-V2-0-L': 5,  # Mysa V2 Lite
+}
+"""
+The `body.type` value that a device expects in a `msg:44` command (see mysa_messages.md).
+A device ignores commands sent with the wrong `type` for its model, so this must match.
+"""
+
 
 def auther(u):
     def f(request: requests.Request) -> requests.Request:
@@ -107,6 +118,102 @@ def sigv4_sign_mqtt_url(cred: botocore.credentials.Credentials):
         region_name='us-east-1').add_auth(req)
     req.params['X-Amz-Security-Token'] = cred.token  # Plunk the session into the URL after signing
     return req.prepare().url
+
+
+def command_body_for_model(
+    model: str,
+    *,
+    set_point: Optional[float] = None,
+    mode: Optional[str] = None,         # 'off', 'on' (BB), 'floor'/'ambient' (INF)
+    resume: bool = False,               # resume following the schedule
+    hold: bool = False,                 # hold indefinitely (until explicitly changed)
+    hold_until: Optional[int] = None,   # hold until this Unix time, then resume the schedule
+) -> dict:
+    """Translate a high-level control intent into the `body.cmd` dict of a `msg:44`
+    command (see mysa_messages.md, "Change setpoint or mode"), accounting for
+    per-model quirks. Raises ValueError for unsupported or contradictory combinations.
+
+    The relevant `cmd` keys are:
+      sp = setpoint (°C)
+      md = mode (1=off, 3=on/heat; INF floor uses md=3+tr=3, ambient uses md=5+tr=5)
+      tr = tracked sensor for INF-V1-0 (3=floor, 5=ambient)
+      ho = hold behaviour (1=follow schedule, 2=hold until explicitly changed)
+      tm = "until" time (-1 = until the next scheduled change; else a Unix time)
+    """
+    chosen_holds = [name for name, on in
+                    (('--resume-schedule', resume), ('--hold', hold),
+                     ('--hold-until', hold_until is not None)) if on]
+    if len(chosen_holds) > 1:
+        raise ValueError(f"{' and '.join(chosen_holds)} are mutually exclusive")
+    if resume and (set_point is not None or mode is not None):
+        raise ValueError("--resume-schedule hands control back to the device's schedule "
+                         "and can't be combined with --set-point or --mode")
+
+    cmd = {}
+    if mode == 'off':
+        cmd['md'] = 1
+    elif mode == 'on':
+        if model == 'INF-V1-0':
+            raise ValueError("Floor thermostats (INF-V1-0) need '--mode floor' or '--mode ambient', not '--mode on'")
+        cmd['md'] = 3
+    elif mode == 'floor':
+        if model != 'INF-V1-0':
+            raise ValueError(f"'--mode floor' only applies to floor thermostats (INF-V1-0), not {model!r}")
+        cmd['md'], cmd['tr'] = 3, 3
+    elif mode == 'ambient':
+        if model != 'INF-V1-0':
+            raise ValueError(f"'--mode ambient' only applies to floor thermostats (INF-V1-0), not {model!r}")
+        cmd['md'], cmd['tr'] = 5, 5
+    elif mode is not None:
+        raise ValueError(f"Unknown mode {mode!r}")
+
+    if set_point is not None:
+        cmd['sp'] = set_point
+
+    if resume:
+        cmd['ho'], cmd['tm'] = 1, -1
+    elif hold:
+        cmd['ho'], cmd['tm'] = 2, -1
+    elif hold_until is not None:
+        cmd['ho'], cmd['tm'] = 1, int(hold_until)
+    elif 'tm' not in cmd:
+        cmd['tm'] = -1   # a bare setpoint/mode change holds only until the next scheduled change
+
+    if not cmd or set(cmd) <= {'tm'}:
+        raise ValueError("No actionable command was specified")
+    return cmd
+
+
+def make_command(
+    did: str,
+    user_id: str,
+    model: str,
+    cmd_body,
+    id_: Optional[int] = None,
+    ts: Optional[int] = None,
+) -> dict:
+    """Assemble a complete `msg:44` command payload (the JSON published to
+    `/v1/dev/$DID/in`) from a `cmd` dict (or list of them) such as that returned by
+    `command_body_for_model`. `id_` is echoed back as `resp_id` in the device's reply.
+    Raises ValueError if the model's command `type` code is unknown."""
+    typ = COMMAND_TYPE_BY_MODEL.get(model)
+    if typ is None:
+        raise ValueError(f"Don't know the command 'type' code for model {model!r} "
+                         f"(known models: {', '.join(sorted(COMMAND_TYPE_BY_MODEL))})")
+    ts = int(time()) if ts is None else int(ts)
+    id_ = int(time() * 1000) if id_ is None else int(id_)
+    return {
+        "Timestamp": ts,
+        "body": {"cmd": [cmd_body] if isinstance(cmd_body, dict) else list(cmd_body),
+                 "type": typ, "ver": 1},
+        "dest": {"ref": did, "type": 1},
+        "id": id_,
+        "msg": 44,
+        "resp": 2,
+        "src": {"ref": user_id, "type": 100},
+        "time": ts,
+        "ver": "1.0",
+    }
 
 
 @dataclass

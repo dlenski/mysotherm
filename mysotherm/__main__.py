@@ -30,6 +30,49 @@ logging.basicConfig(format='[%(levelname)s:%(name)s] %(asctime)s - %(message)s',
     level=os.environ.get('LOGLEVEL', 'INFO').strip().upper())
 logger = logging.getLogger(__name__)
 
+def send_commands(ws, commands, devices, user_id, timeout):
+    """Publish each msg:44 command (QOS=1) to its device's /in topic, then wait up to
+    `timeout` seconds for the device's msg:44 reply on /out (matched by resp_id == the
+    id we sent). Returns (unacked_dids, failed_dids): devices that never replied, and
+    devices whose reply reported success != 1.
+
+    `commands` is {device_id: cmd_body_dict}."""
+    pending = {}   # resp_id (== sent id) -> device_id
+    base_id = int(time() * 1000)
+    for i, (did, cmd) in enumerate(commands.items()):
+        id_ = base_id + i
+        payload = mysa_stuff.make_command(did, user_id, devices[did].Model, cmd, id_=id_)
+        ws.send(mqttpacket.publish(f'/v1/dev/{did}/in', False, 1, False,
+                                   packet_id=0x4000 + i, payload=json.dumps(payload).encode()))
+        pending[id_] = did
+        print(f'TO   ==> {devices[did].Name} ({did}): commanding {json.dumps(cmd)}')
+
+    failed = set()
+    deadline = time() + timeout
+    while pending and time() < deadline:
+        try:
+            msg = mqttpacket.parse_one(ws.recv(max(0.05, deadline - time())))
+        except TimeoutError:
+            break
+        if not isinstance(msg, mqttpacket.PublishPacket):
+            continue
+        try:
+            j = json.loads(msg.payload, object_hook=slurpy, strict=False)
+        except Exception:
+            j = None
+        if j and j.get('msg') == 44 and msg.topic.endswith('/out'):
+            did = pending.pop(j.get('resp_id'), None)
+            if did is not None:
+                body = j.get('body') or {}
+                if body.get('success') != 1:
+                    failed.add(did)
+                logger.debug(f'Device {did} acknowledged command: {json.dumps(body)}')
+        if msg.qos > 0:
+            ws.send(mqttpacket.puback(msg.packetid))
+
+    return set(pending.values()), failed
+
+
 def main(args=None):
     p = ArgumentParser()
     p.add_argument('-u', '--user', help=f'Mysa username (default is first one configured in {CONFIG_FILE!r})')
@@ -42,6 +85,18 @@ def main(args=None):
     p.add_argument('--check-readings', action='store_true', help='Check details of raw readings against status information.')
     p.add_argument('--inject', default=[], action='append', help='After connecting to MQTT endpoint, send this publish packet (format is topic=JSON, and may be specified multiple times)')
     p.add_argument('--inject-dump-bin', action='store_true', help='After connecting to MQTT endpoint, tell all devices to dump their binary readings immediately.')
+
+    g = p.add_argument_group('Device control', 'Send a command to the device(s) named with --device, wait for acknowledgement, then exit. '
+                             'Requires an explicit --device list. Exits 0 if every device acknowledged, non-zero otherwise.')
+    g.add_argument('--set-point', type=float, metavar='TEMP', help='Set the target temperature (°C by default; see --fahrenheit).')
+    g.add_argument('-F', '--fahrenheit', action='store_true', help='Interpret --set-point as °F instead of °C (converted to the nearest 0.5°C, since that is the resolution Mysa uses internally).')
+    g.add_argument('--mode', choices=('off', 'on', 'floor', 'ambient'),
+                   help="Set the operating mode. 'off'/'on' for baseboard models; 'floor'/'ambient' (the tracked sensor) for floor (INF-V1-0) models.")
+    g.add_argument('--resume-schedule', action='store_true', help='Resume following the schedule (clear any manual hold), starting at the next scheduled change.')
+    g.add_argument('--hold', action='store_true', help='Hold the current/given setting indefinitely, until explicitly changed.')
+    g.add_argument('--hold-until', type=int, metavar='UNIXTIME', help='Hold the current/given setting until this Unix time, then resume the schedule.')
+    g.add_argument('--command-timeout', type=float, default=30.0, metavar='SECS', help='Seconds to wait for device acknowledgement of a command (default: %(default)s).')
+
     args = p.parse_args(args)
 
     bsess = boto3.session.Session(region_name=mysa_stuff.REGION)
@@ -107,6 +162,27 @@ def main(args=None):
         if (missing := set(args.device) - set(devices)):
             p.error(f"Device ID(s) {', '.join(missing)} not found in your Mysa account.")
 
+    # Build device-control commands (msg:44 payloads), if any control options were given
+    command_mode = (args.set_point is not None or args.mode is not None
+                    or args.resume_schedule or args.hold or args.hold_until is not None)
+    commands = {}
+    if command_mode:
+        if not args.device:
+            p.error("Device control commands (--set-point/--mode/--resume-schedule/--hold/--hold-until) "
+                    "require an explicit --device list.")
+        set_point = args.set_point
+        if set_point is not None and args.fahrenheit:
+            set_point = round((set_point - 32) * 5 / 9 * 2) / 2  # °F -> nearest 0.5°C
+            print(f'Interpreting --set-point {args.set_point:g}°F as {set_point:g}°C.')
+        for did in args.device:
+            try:
+                commands[did] = mysa_stuff.command_body_for_model(
+                    devices[did].Model,
+                    set_point=set_point, mode=args.mode, resume=args.resume_schedule,
+                    hold=args.hold, hold_until=args.hold_until)
+            except ValueError as exc:
+                p.error(f"{devices[did].Name} ({did}, model {devices[did].Model!r}): {exc}")
+
     if args.dump_lots:
         print("GET /users | .json() | .User")
         print("============================")
@@ -125,10 +201,13 @@ def main(args=None):
         pprint(homes)
 
     print_device_states(devices, states, firmware, args.device)
-    if args.no_watch:
+    if args.no_watch and not command_mode:
         return
 
-    print("Connecting to MQTT endpoint to watch real-time messages...")
+    if command_mode:
+        print("Connecting to MQTT endpoint to send command(s)...")
+    else:
+        print("Connecting to MQTT endpoint to watch real-time messages...")
 
     # Now we need to use these credentials to do a "SigV4 presigning" of the target URL that
     # will be used for the HTTP->websockets connection: https://a3q27gia9qg3zy-ats.iot.us-east-1.amazonaws.com/mqtt
@@ -175,6 +254,18 @@ def main(args=None):
             topic, j = ij.split('=', 1)
             ws.send(mqttpacket.publish(topic, False, 1, False, packet_id=ii ^ 0x9000, payload=j.encode()))
             print(f'Injected MQTT message to {topic!r}, with QOS=1 and contents {j!r}')
+
+        if command_mode:
+            unacked, failed = send_commands(ws, commands, devices, user.Id, args.command_timeout)
+            for did in args.device:
+                name = devices[did].Name
+                if did in unacked:
+                    print(f'  ✗ {name} ({did}): no acknowledgement within {args.command_timeout:g}s')
+                elif did in failed:
+                    print(f'  ✗ {name} ({did}): device reported failure')
+                else:
+                    print(f'  ✓ {name} ({did}): command acknowledged')
+            p.exit(0 if not (unacked or failed) else 1)
 
         timeout = time() + 60
         recheck_device_state_at = {}
