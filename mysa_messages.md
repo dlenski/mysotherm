@@ -303,6 +303,9 @@ And also this version:
  "body": {"ver": "3.0.0", "hash": "ea85ca7", "events": [], "totalEvents": 0}}
 ```
 
+This also sometimes appears with `"ver": 2` instead of `"ver": "3.0.0"`, but seemingly
+with no other meaningful differences.
+
 ## Set schedule
 
 Sent by app to `/v1/dev/$DID/in` with QOS=0:
