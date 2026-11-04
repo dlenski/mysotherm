@@ -325,22 +325,22 @@ def main(args=None):
                                 assert not src
                                 body = j.pop('body')
                                 assert not j
-                                assert body.pop('ver') == '3.0.0'
-                                hash = body.pop('hash')
-                                events = body.pop('events')
-                                nevents = body.pop('totalEvents')
-                                if events:
-                                    assert len(events) <= nevents
-                                    ctime = body.pop('createTime')
-                                    assert hash
-                                    assert src_ref
-                                    understood = f'Set schedule (source {src_ref}, createTime {ctime}, hash {hash}), {len(events)}/{nevents} events: {events}'
-                                else:
-                                    assert nevents == 0
-                                    # assert not hash    # usually empty, but not always
-                                    assert not src_ref
-                                    understood = f'Delete schedule (hash {hash!r})'
-                                assert not body
+                                if body.pop('ver') in (2, '3.0.0'):
+                                    hash = body.pop('hash')
+                                    events = body.pop('events')
+                                    nevents = body.pop('totalEvents')
+                                    if events:
+                                        assert len(events) <= nevents
+                                        ctime = body.pop('createTime')
+                                        assert hash
+                                        assert src_ref
+                                        understood = f'Set schedule (source {src_ref}, createTime {ctime}, hash {hash}), {len(events)}/{nevents} events: {events}'
+                                    else:
+                                        assert nevents == 0
+                                        # assert not hash    # usually empty, but not always
+                                        assert not src_ref
+                                        understood = f'Delete schedule (hash {hash!r})'
+                                    assert not body
                             elif mt == 61 and subtopic == 'out':
                                 assert j.pop('time') == 0
                                 assert j.pop('ver') == '1.0'
