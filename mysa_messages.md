@@ -2,7 +2,7 @@
 
 - `DID` is the 12-digit MAC address of the device.
 - MQTT topics are `/v1/dev/$DID/{out,in}`
-- `UNIXTIME` is in seconds, `UNIXTIMEMS` is in milliseconds
+- `UNIXTIME` is in seconds, `UNIXTIMEMS` is in milliseconds [since `1970-01-01T00:00:00Z`](https://en.wikipedia.org/wiki/Unix_time#Definition)
 - `USER_UUID` is the UUID associated with a user account (seen in `/users` response
 - `HOME_UUID` is the UUID associated with a home (seen in `/homes` response
 - `MODEL` is `BB-V1-1` (Mysa V1 Baseboard), `BB-V2-0-L` (Mysa V2 Lite), `BB-V2-0` (Mysa V2 Baseboard), etc.
